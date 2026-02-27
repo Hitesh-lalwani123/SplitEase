@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SplitEase — Expense Sharing Made Simple</title>
+  <meta name="description"
+    content="Split expenses effortlessly with friends and groups. Track balances, settle debts, and visualize spending.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+
+<body>
+  <!-- Auth Pages -->
+  <div id="auth-page" class="page">
+    <div class="auth-container">
+      <div class="auth-brand">
+        <div class="brand-icon">💸</div>
+        <h1>Split<span class="accent">Ease</span></h1>
+        <p class="brand-tagline">Expense Sharing Made Simple</p>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" class="auth-form active">
+        <h2>Welcome Back</h2>
+        <div id="google-login-btn-wrap" class="google-btn-wrap hidden">
+          <a id="google-login-btn" href="/api/oauth/google" class="btn btn-google btn-full">
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <path fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
+              <path fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            </svg>
+            Sign in with Google
+          </a>
+          <div class="auth-divider"><span>or</span></div>
+        </div>
+        <div class="form-group">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" placeholder="you@example.com" required>
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+        <p class="auth-switch">Don't have an account? <a href="#" id="show-register">Sign Up</a></p>
+      </form>
+
+      <!-- Register Form -->
+      <form id="register-form" class="auth-form">
+        <h2>Create Account</h2>
+        <div id="google-register-btn-wrap" class="google-btn-wrap hidden">
+          <a id="google-register-btn" href="/api/oauth/google" class="btn btn-google btn-full">
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <path fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
+              <path fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            </svg>
+            Sign up with Google
+          </a>
+          <div class="auth-divider"><span>or</span></div>
+        </div>
+        <div class="form-group">
+          <label for="register-name">Full Name</label>
+          <input type="text" id="register-name" placeholder="John Doe" required>
+        </div>
+        <div class="form-group">
+          <label for="register-email">Email</label>
+          <input type="email" id="register-email" placeholder="you@example.com" required>
+        </div>
+        <div class="form-group">
+          <label for="register-password">Password</label>
+          <input type="password" id="register-password" placeholder="Min 6 characters" required minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+        <p class="auth-switch">Already have an account? <a href="#" id="show-login">Sign In</a></p>
+      </form>
+
+      <div id="auth-error" class="error-message"></div>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div id="app" class="app hidden">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <span class="header-logo">💸</span>
+        <h1 class="header-title">Split<span class="accent">Ease</span></h1>
+      </div>
+      <div class="header-right">
+        <button id="calculator-btn" class="btn btn-ghost btn-sm" title="Calculator"
+          style="font-size:1.1rem;padding:0.3rem 0.6rem">🧮</button>
+        <div id="user-avatar" class="avatar-sm" title="My Profile" style="cursor:pointer"></div>
+        <button id="logout-btn" class="btn btn-ghost btn-sm" title="Sign Out">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Page Content -->
+    <main class="app-content">
+      <!-- Dashboard Page -->
+      <div id="dashboard-page" class="page-section active">
+        <div class="page-header">
+          <h2>Dashboard</h2>
+          <button id="add-expense-btn" class="btn btn-primary btn-sm">+ Add Expense</button>
+        </div>
+
+        <div class="balance-cards">
+          <div class="balance-card card-positive">
+            <span class="balance-label">You are owed</span>
+            <span id="total-owed" class="balance-amount">₹0.00</span>
+          </div>
+          <div class="balance-card card-negative">
+            <span class="balance-label">You owe</span>
+            <span id="total-owe" class="balance-amount">₹0.00</span>
+          </div>
+          <div class="balance-card card-net">
+            <span class="balance-label">Net Balance</span>
+            <span id="net-balance" class="balance-amount">₹0.00</span>
+          </div>
+        </div>
+
+        <div class="section-header">
+          <h3>Group Balances</h3>
+        </div>
+        <div id="group-balances-list" class="group-balances-list">
+          <div class="empty-state">No groups yet. Create one to start splitting!</div>
+        </div>
+
+        <div class="section-header">
+          <h3>Recent Activity</h3>
+        </div>
+        <div id="recent-expenses" class="expense-list">
+          <div class="empty-state">No expenses yet</div>
+        </div>
+      </div>
+
+      <!-- Groups Page -->
+      <div id="groups-page" class="page-section">
+        <div class="page-header">
+          <h2>Groups</h2>
+          <div style="display:flex;gap:0.5rem">
+            <button id="join-group-btn" class="btn btn-outline btn-sm">🔗 Join</button>
+            <button id="create-group-btn" class="btn btn-primary btn-sm">+ New Group</button>
+          </div>
+        </div>
+        <div id="groups-list" class="groups-grid">
+          <div class="empty-state">No groups yet. Create your first group!</div>
+        </div>
+      </div>
+
+      <!-- Group Detail Page -->
+      <div id="group-detail-page" class="page-section">
+        <div class="page-header">
+          <button id="back-to-groups" class="btn btn-ghost btn-sm">← Back</button>
+          <h2 id="group-detail-name">Group</h2>
+          <div class="header-actions">
+            <button id="group-add-expense-btn" class="btn btn-primary btn-sm">+ Add Expense</button>
+            <button id="group-settle-btn" class="btn btn-outline btn-sm">Settle Up</button>
+          </div>
+        </div>
+
+        <!-- Admin actions (hidden for non-admins) -->
+        <div id="admin-actions-row" style="display:none;margin-bottom:0.75rem;gap:0.5rem;flex-wrap:wrap">
+          <button id="group-settings-btn" class="btn btn-ghost btn-sm" style="display:none">⚙️ Group Settings</button>
+        </div>
+        <!-- Leave group (non-owner members only) -->
+        <div id="leave-group-row" style="display:none;margin-bottom:0.75rem">
+          <button id="leave-group-btn" class="btn btn-ghost btn-sm" style="color:#f97316;border-color:#f97316">🚪 Leave
+            Group</button>
+          <span id="leave-pending-badge"
+            style="display:none;font-size:0.78rem;color:var(--text-muted);margin-left:0.5rem">⏳ Leave request
+            pending…</span>
+        </div>
+
+        <!-- Leave Requests (admin view) -->
+        <div id="leave-requests-section" style="display:none;margin-top:1rem">
+          <h4 style="font-size:0.9rem;color:var(--text-muted);margin-bottom:0.5rem">🚪 Leave Requests</h4>
+          <div id="leave-requests-list"></div>
+        </div>
+
+        <!-- Join Requests (admin only) -->
+        <div id="join-requests-section" style="display:none;margin-top:1rem">
+          <div class="section-header">
+            <h3>⏳ Join Requests</h3>
+          </div>
+          <div id="join-requests-list"></div>
+        </div>
+
+        <div id="group-members-section" class="members-section">
+          <div class="section-header">
+            <h3>Members</h3>
+            <div style="display:flex;gap:0.5rem">
+              <button id="add-member-btn" class="btn btn-ghost btn-sm">+ Add</button>
+              <button id="invite-member-btn" class="btn btn-ghost btn-sm">✉ Invite</button>
+            </div>
+          </div>
+          <div id="group-members-list" class="members-list"></div>
+        </div>
+
+        <div id="group-balances-section" class="balances-section">
+          <div class="section-header">
+            <h3>Balances</h3>
+          </div>
+          <div id="group-balance-details" class="balance-details"></div>
+        </div>
+
+        <div class="section-header">
+          <h3>Expenses</h3>
+        </div>
+        <div id="group-expenses-list" class="expense-list"></div>
+      </div>
+
+      <!-- Analytics Page -->
+      <div id="analytics-page" class="page-section">
+        <div class="page-header">
+          <h2>Analytics</h2>
+        </div>
+        <!-- Controls are injected by charts.js -->
+        <div id="analytics-controls"></div>
+        <!-- Charts are rendered here dynamically -->
+        <div id="analytics-body" style="margin-top:1.25rem"></div>
+      </div>
+
+      <!-- Activity Page -->
+      <div id="activity-page" class="page-section">
+        <div class="page-header">
+          <h2>All Activity</h2>
+        </div>
+        <div id="all-expenses-list" class="expense-list">
+          <div class="empty-state">No expenses yet</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-page="dashboard">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-item" data-page="groups">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+        <span>Groups</span>
+      </button>
+      <button class="nav-item nav-add-btn" id="fab-add-expense">
+        <div class="fab-icon">+</div>
+      </button>
+      <button class="nav-item" data-page="analytics">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="20" x2="18" y2="10" />
+          <line x1="12" y1="20" x2="12" y2="4" />
+          <line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+        <span>Charts</span>
+      </button>
+      <button class="nav-item" data-page="activity">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+        <span>Activity</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Add/Edit Expense Modal -->
+  <div id="expense-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="expense-modal-title">Add Expense</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="expense-form">
+        <!-- Group selector (hidden when pre-selected from group detail) -->
+        <div class="form-group" id="expense-group-wrap">
+          <label>Group</label>
+          <select id="expense-group" class="select-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <input type="text" id="expense-description" placeholder="What was this for?" autocomplete="off">
+          <div id="auto-category-badge" class="category-badge hidden"></div>
+        </div>
+
+        <!-- Payers Section -->
+        <div class="form-group">
+          <label>Who Paid? <span class="label-hint">(select one or multiple)</span></label>
+          <div id="payers-list" class="payers-list"></div>
+
+          <!-- Single-payer: enter total amount -->
+          <div id="single-payer-amount-wrap" style="display:none;align-items:center;gap:0.5rem;margin-top:0.5rem">
+            <span style="color:var(--text-muted);font-size:0.9rem">Total Amount:</span>
+            <div style="display:flex;align-items:center;gap:0.25rem;flex:1">
+              <span class="currency-prefix">₹</span>
+              <input type="number" id="single-payer-amount" class="payer-amount-input" placeholder="0.00" step="0.01"
+                min="0" oninput="Expenses.updateEqualSplitPreview()">
+            </div>
+          </div>
+
+          <!-- Multi-payer: running total with breakdown -->
+          <div class="payers-total" id="payers-total-row" style="display:none">
+            Total: <strong id="payers-total-display">₹0.00</strong>
+            <span id="payers-total-status" class="payers-status"></span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Category</label>
+          <div id="category-selector" class="category-grid"></div>
+        </div>
+        <div class="form-group">
+          <label>Split Type</label>
+          <div class="split-type-selector">
+            <button type="button" class="split-type-btn active" data-type="equal">Equal</button>
+            <button type="button" class="split-type-btn" data-type="exact">Exact</button>
+            <button type="button" class="split-type-btn" data-type="percentage">Percentage</button>
+          </div>
+        </div>
+        <!-- Equal split: member selection checkboxes -->
+        <div id="equal-split-members" class="form-group hidden">
+          <label>Who is involved? <span class="label-hint">(uncheck to exclude)</span></label>
+          <div id="equal-members-list" class="members-check-list"></div>
+          <div class="split-preview" id="equal-split-preview"></div>
+        </div>
+        <!-- Exact / Percentage custom splits -->
+        <div id="custom-splits" class="custom-splits hidden"></div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="expense-date">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="expense-submit-btn">Save Expense</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Group Modal -->
+  <div id="group-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Create Group</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="group-form">
+        <div class="form-group">
+          <label>Group Name</label>
+          <input type="text" id="group-name-input" placeholder="e.g., Roommates, Trip to Goa" required>
+        </div>
+        <div class="form-group">
+          <label>Description (optional)</label>
+          <input type="text" id="group-desc-input" placeholder="What's this group for?">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Create Group</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Join Group Modal -->
+  <div id="join-group-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🔗 Join a Group</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="join-group-form">
+        <div class="form-group">
+          <label>Group Join Code</label>
+          <input type="text" id="join-code-input" placeholder="e.g., A3F9C1" maxlength="6"
+            style="text-transform:uppercase;letter-spacing:0.2em;font-weight:700;font-size:1.1rem" required>
+          <p class="form-hint">Ask the group creator for the 6-character join code.</p>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Join Group</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Member Modal -->
+  <div id="member-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add Member</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="member-form">
+        <div class="form-group">
+          <label>Member's Email</label>
+          <input type="email" id="member-email-input" placeholder="friend@example.com" required>
+        </div>
+        <p class="form-hint">The person must have a SplitEase account to add directly</p>
+        <button type="submit" class="btn btn-primary btn-full">Add Member</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Invite by Email Modal -->
+  <div id="invite-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Invite to Group</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+
+      <!-- Join Code Section -->
+      <div id="invite-modal-join-code" class="join-code-invite-box" style="display:none">
+        <span class="join-code-label">🔗 Join Code:</span>
+        <span id="invite-modal-code-value" class="join-code-value"></span>
+        <button id="copy-invite-code-btn" class="btn btn-ghost btn-sm">📋 Copy</button>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin:0.4rem 0 0">Share this code so anyone can request to
+          join.</p>
+      </div>
+
+      <form id="invite-form">
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="invite-email-input" placeholder="friend@example.com" required>
+        </div>
+        <p class="form-hint">We'll send them an email invitation. They can sign up if they don't have an account yet.
+        </p>
+        <button type="submit" class="btn btn-primary btn-full">Send Invitation</button>
+      </form>
+      <div id="pending-invites-section" class="pending-invites" style="margin-top:1rem">
+        <h4 style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem">Pending Invites</h4>
+        <div id="pending-invites-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settle Modal -->
+  <div id="settle-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Settle Up</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 1rem">A notification email will be sent to the
+        other party when you settle.</p>
+      <div id="settle-transactions" class="settle-list"></div>
+    </div>
+  </div>
+
+  <!-- Group Settings Modal -->
+  <div id="group-settings-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>⚙️ Group Settings</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+
+      <!-- Edit Name & Description -->
+      <form id="group-settings-form">
+        <div class="form-group">
+          <label>Group Name</label>
+          <input type="text" id="settings-group-name" placeholder="Group name" required>
+        </div>
+        <div class="form-group">
+          <label>Description <span style="color:var(--text-muted);font-size:0.8rem">(optional)</span></label>
+          <input type="text" id="settings-group-desc" placeholder="What's this group for?">
+        </div>
+
+        <!-- Retention Period (owner only) -->
+        <div class="form-group" id="settings-retention-wrap">
+          <label>Data Retention Period
+            <span style="color:var(--text-muted);font-size:0.78rem;display:block;margin-top:2px">Expenses older than
+              this will be hidden from all views</span>
+          </label>
+          <select id="settings-retention" class="select-input">
+            <option value="">No limit (keep all)</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 3 months</option>
+            <option value="180">Last 6 months</option>
+            <option value="365">Last 1 year</option>
+            <option value="730">Last 2 years</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-full">Save Changes</button>
+      </form>
+
+      <!-- Custom Categories -->
+      <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.08)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+          <h4 style="margin:0;font-size:0.95rem">🏷️ Custom Categories</h4>
+          <button class="btn btn-ghost btn-sm" id="open-custom-category-btn">+ Add</button>
+        </div>
+        <div id="custom-categories-list" style="display:flex;flex-wrap:wrap;gap:0.5rem"></div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div id="settings-danger-zone"
+        style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(239,68,68,0.3)">
+        <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:0.75rem">⚠️ Danger Zone — owner only</p>
+        <button id="delete-group-btn" class="btn btn-danger btn-full">🗑️ Delete This Group</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Category Modal -->
+  <div id="custom-category-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🏷️ Add Custom Category</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="custom-category-form">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="custom-cat-name" placeholder="e.g., Petrol" required maxlength="30">
+        </div>
+        <div class="form-group">
+          <label>Icon <span style="color:var(--text-muted);font-size:0.8rem">(paste an emoji)</span></label>
+          <input type="text" id="custom-cat-icon" placeholder="e.g. ⛽" required maxlength="4"
+            style="font-size:1.5rem;text-align:center;width:80px">
+        </div>
+        <div class="form-group">
+          <label>Color</label>
+          <div style="display:flex;align-items:center;gap:0.75rem">
+            <input type="color" id="custom-cat-color" value="#14b8a6"
+              style="width:48px;height:36px;border:none;border-radius:8px;cursor:pointer;background:none">
+            <span id="custom-cat-color-preview" style="font-size:0.85rem;color:var(--text-muted)">#14b8a6</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Keywords <span style="color:var(--text-muted);font-size:0.8rem">(for auto-categorization — press Enter
+              or comma to add)</span></label>
+          <div id="keyword-tags-wrap"
+            style="display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;min-height:44px;cursor:text"
+            onclick="document.getElementById('keyword-tag-input').focus()">
+            <!-- tags injected here -->
+            <input type="text" id="keyword-tag-input" placeholder="e.g. petrol, cng, fuel…" autocomplete="off"
+              style="border:none;background:transparent;outline:none;color:var(--text);font-size:0.85rem;min-width:120px;flex:1">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Create Category</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Calculator Modal -->
+  <div id="calculator-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content calculator-modal-content">
+      <div class="modal-header">
+        <h3>🧮 Calculator</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="calculator">
+        <div id="calc-display" class="calc-display">0</div>
+        <div class="calc-grid">
+          <button class="calc-btn calc-btn-fn" onclick="Calculator.clear()">C</button>
+          <button class="calc-btn calc-btn-fn" onclick="Calculator.backspace()">⌫</button>
+          <button class="calc-btn calc-btn-op" onclick="Calculator.append('%')">%</button>
+          <button class="calc-btn calc-btn-op" onclick="Calculator.append('÷')">÷</button>
+
+          <button class="calc-btn" onclick="Calculator.append('7')">7</button>
+          <button class="calc-btn" onclick="Calculator.append('8')">8</button>
+          <button class="calc-btn" onclick="Calculator.append('9')">9</button>
+          <button class="calc-btn calc-btn-op" onclick="Calculator.append('×')">×</button>
+
+          <button class="calc-btn" onclick="Calculator.append('4')">4</button>
+          <button class="calc-btn" onclick="Calculator.append('5')">5</button>
+          <button class="calc-btn" onclick="Calculator.append('6')">6</button>
+          <button class="calc-btn calc-btn-op" onclick="Calculator.append('-')">−</button>
+
+          <button class="calc-btn" onclick="Calculator.append('1')">1</button>
+          <button class="calc-btn" onclick="Calculator.append('2')">2</button>
+          <button class="calc-btn" onclick="Calculator.append('3')">3</button>
+          <button class="calc-btn calc-btn-op" onclick="Calculator.append('+')">+</button>
+
+          <button class="calc-btn calc-btn-zero" onclick="Calculator.append('0')">0</button>
+          <button class="calc-btn" onclick="Calculator.append('.')">.</button>
+          <button class="calc-btn calc-btn-eq" onclick="Calculator.calculate()">=</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profile Modal -->
+  <div id="profile-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>👤 My Profile</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="profile-form">
+        <div class="profile-avatar-section">
+          <div id="profile-photo-preview" class="profile-avatar-preview"></div>
+          <label class="btn btn-outline btn-sm" style="cursor:pointer">
+            📷 Change Photo
+            <input type="file" id="profile-photo-input" accept="image/*" style="display:none">
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label>Email</label>
+          <div id="profile-email-display" class="profile-email-display"></div>
+        </div>
+
+        <div class="form-group">
+          <label>Display Name</label>
+          <input type="text" id="profile-name-input" placeholder="Your name" required>
+        </div>
+
+        <div class="form-group">
+          <label>Avatar Color</label>
+          <div class="color-swatches">
+            <div class="color-swatch" data-color="#14b8a6" style="background:#14b8a6"></div>
+            <div class="color-swatch" data-color="#f97316" style="background:#f97316"></div>
+            <div class="color-swatch" data-color="#3b82f6" style="background:#3b82f6"></div>
+            <div class="color-swatch" data-color="#a855f7" style="background:#a855f7"></div>
+            <div class="color-swatch" data-color="#ec4899" style="background:#ec4899"></div>
+            <div class="color-swatch" data-color="#10b981" style="background:#10b981"></div>
+            <div class="color-swatch" data-color="#6366f1" style="background:#6366f1"></div>
+            <div class="color-swatch" data-color="#eab308" style="background:#eab308"></div>
+            <div class="color-swatch" data-color="#ef4444" style="background:#ef4444"></div>
+          </div>
+        </div>
+
+        <div id="password-change-section">
+          <div class="form-group">
+            <label>Current Password</label>
+            <input type="password" id="current-password-input" placeholder="Current password"
+              autocomplete="current-password">
+          </div>
+          <div class="form-group">
+            <label>New Password <span style="color:var(--text-muted);font-size:0.8rem">(leave blank to
+                keep)</span></label>
+            <input type="password" id="new-password-input" placeholder="New password (min 6 chars)"
+              autocomplete="new-password">
+          </div>
+        </div>
+
+        <p id="profile-error" style="color:#ef4444;font-size:0.85rem;min-height:1.2rem"></p>
+        <button type="submit" id="profile-save-btn" class="btn btn-primary btn-full">Save Changes</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/dashboard.js"></script>
+  <script src="/js/groups.js"></script>
+  <script src="/js/expenses.js"></script>
+  <script src="/js/charts.js"></script>
+  <script src="/js/settle.js"></script>
+  <script src="/js/invitations.js"></script>
+  <script src="/js/calculator.js"></script>
+  <script src="/js/profile.js"></script>
+</body>
+
+</html>

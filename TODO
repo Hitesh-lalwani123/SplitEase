@@ -1,0 +1,4 @@
+1. Move db functionality to some cloud database.
+2. Apply background db push and background email sending.
+3. Real time expense update for user.
+4. Do performance testing with multiple user at a time.
