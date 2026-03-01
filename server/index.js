@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-const { getDb } = require('./db/database');
+const { initializeDatabase } = require('./db/migrate');
 const authRoutes = require('./routes/auth');
 const groupRoutes = require('./routes/groups');
 const expenseRoutes = require('./routes/expenses');
@@ -11,9 +11,6 @@ const settlementRoutes = require('./routes/settlements');
 const analyticsRoutes = require('./routes/analytics');
 const oauthRoutes = require('./routes/oauth');
 const invitationRoutes = require('./routes/invitations');
-
-// Initialize DB and run all migrations BEFORE starting the server
-getDb();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,6 +44,15 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-    console.log(`✅ SplitWise Clone running at http://localhost:${PORT}`);
-});
+// Initialize DB first, then start server
+(async () => {
+    try {
+        await initializeDatabase();
+        app.listen(PORT, () => {
+            console.log(`✅ SplitEase running at http://localhost:${PORT}`);
+        });
+    } catch (err) {
+        console.error('❌ Failed to initialize database:', err.message);
+        process.exit(1);
+    }
+})();

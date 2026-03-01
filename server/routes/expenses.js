@@ -1,359 +1,434 @@
 const express = require('express');
-const { getDb } = require('../db/database');
+const { query, withTransaction } = require('../db/database');
 const { authenticate } = require('../middleware/auth');
 const { categorize } = require('../utils/categorizer');
 const { sendExpenseNotification } = require('../utils/mailer');
+const { enqueue } = require('../utils/queue');
 
 const router = express.Router();
 
-// Helper: get full expense with payers and splits
-function getFullExpense(db, expenseId) {
-    const expense = db.prepare(`
-    SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
-           u.name as paid_by_name, u.avatar_color as paid_by_color
-    FROM expenses e
-    LEFT JOIN categories c ON e.category_id = c.id
-    LEFT JOIN users u ON e.paid_by = u.id
-    WHERE e.id = ?
-  `).get(expenseId);
+// ─── Helper: get full expense with payers and splits ─────────────────────────
+async function getFullExpense(expenseId) {
+    const result = await query(`
+        SELECT e.*, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
+               u.name AS paid_by_name, u.avatar_color AS paid_by_color
+        FROM expenses e
+        LEFT JOIN categories c ON e.category_id = c.id
+        LEFT JOIN users u ON e.paid_by = u.id
+        WHERE e.id = $1
+    `, [expenseId]);
 
-    if (!expense) return null;
+    if (!result.rows.length) return null;
+    const expense = result.rows[0];
 
-    expense.payers = db.prepare(`
-    SELECT ep.*, u.name as user_name, u.avatar_color
-    FROM expense_payers ep
-    JOIN users u ON ep.user_id = u.id
-    WHERE ep.expense_id = ?
-  `).all(expenseId);
+    const payers = await query(`
+        SELECT ep.*, u.name AS user_name, u.avatar_color
+        FROM expense_payers ep
+        JOIN users u ON ep.user_id = u.id
+        WHERE ep.expense_id = $1
+    `, [expenseId]);
+    expense.payers = payers.rows;
 
-    expense.splits = db.prepare(`
-    SELECT es.*, u.name as user_name, u.avatar_color
-    FROM expense_splits es
-    JOIN users u ON es.user_id = u.id
-    WHERE es.expense_id = ?
-  `).all(expenseId);
+    const splits = await query(`
+        SELECT es.*, u.name AS user_name, u.avatar_color
+        FROM expense_splits es
+        JOIN users u ON es.user_id = u.id
+        WHERE es.expense_id = $1
+    `, [expenseId]);
+    expense.splits = splits.rows;
 
     return expense;
 }
 
-// Helper: insert payers and splits
-function insertPayersAndSplits(db, expenseId, groupId, amount, splitType, payers, splits, involvedMembers) {
-    // Insert payers
-    const insertPayer = db.prepare('INSERT INTO expense_payers (expense_id, user_id, amount_paid) VALUES (?, ?, ?)');
+// ─── Helper: insert payers and splits (uses a pg client inside a transaction) ─
+async function insertPayersAndSplits(client, expenseId, groupId, amount, splitType, payers, splits, involvedMembers) {
     for (const p of payers) {
-        insertPayer.run(expenseId, p.user_id, p.amount_paid);
+        await client.query(
+            'INSERT INTO expense_payers (expense_id, user_id, amount_paid) VALUES ($1, $2, $3)',
+            [expenseId, p.user_id, p.amount_paid]
+        );
     }
-
-    // Insert splits
-    const insertSplit = db.prepare('INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES (?, ?, ?)');
 
     if (splitType === 'exact' && splits && splits.length) {
         for (const s of splits) {
-            insertSplit.run(expenseId, s.user_id, s.amount);
+            await client.query(
+                'INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)',
+                [expenseId, s.user_id, s.amount]
+            );
         }
     } else if (splitType === 'percentage' && splits && splits.length) {
         for (const s of splits) {
-            insertSplit.run(expenseId, s.user_id, Math.round((amount * s.percentage / 100) * 100) / 100);
+            const owed = Math.round((amount * s.percentage / 100) * 100) / 100;
+            await client.query(
+                'INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)',
+                [expenseId, s.user_id, owed]
+            );
         }
     } else {
-        // Equal split — use involvedMembers if provided, else all group members
+        // Equal split
         let memberIds;
         if (involvedMembers && involvedMembers.length) {
             memberIds = involvedMembers;
         } else {
-            memberIds = db.prepare('SELECT user_id FROM group_members WHERE group_id = ?').all(groupId).map(m => m.user_id);
+            const members = await client.query('SELECT user_id FROM group_members WHERE group_id = $1', [groupId]);
+            memberIds = members.rows.map(m => m.user_id);
         }
         const splitAmount = Math.round((amount / memberIds.length) * 100) / 100;
         for (const userId of memberIds) {
-            insertSplit.run(expenseId, userId, splitAmount);
+            await client.query(
+                'INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)',
+                [expenseId, userId, splitAmount]
+            );
         }
     }
 }
 
-// Get expenses for a group (respects retention_days)
-router.get('/group/:groupId', authenticate, (req, res) => {
-    const db = getDb();
-    const { groupId } = req.params;
-    const { category, startDate, endDate, limit, offset } = req.query;
-
-    const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, req.userId);
-    if (!isMember) return res.status(403).json({ error: 'Not a member of this group' });
-
-    // Get group retention policy
-    const group = db.prepare('SELECT retention_days FROM groups_ WHERE id = ?').get(groupId);
-    const retentionDays = group ? group.retention_days : null;
-
-    let query = `
-    SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
-           u.name as paid_by_name, u.avatar_color as paid_by_color
-    FROM expenses e
-    LEFT JOIN categories c ON e.category_id = c.id
-    LEFT JOIN users u ON e.paid_by = u.id
-    WHERE e.group_id = ?
-  `;
-    const params = [groupId];
-
-    if (retentionDays && retentionDays > 0) {
-        query += ` AND e.date >= date('now', '-${parseInt(retentionDays)} days')`;
+// ─── Helper: collect involved user IDs (payers ∪ split members) ──────────────
+function buildInvolvedSet(payers, splits, splitType, involvedMembers, allGroupMemberIds) {
+    const ids = new Set();
+    if (payers) payers.forEach(p => ids.add(Number(p.user_id)));
+    if (splitType === 'exact' || splitType === 'percentage') {
+        if (splits) splits.forEach(s => ids.add(Number(s.user_id)));
+    } else {
+        // equal split
+        const members = (involvedMembers && involvedMembers.length) ? involvedMembers : allGroupMemberIds;
+        members.forEach(id => ids.add(Number(id)));
     }
-    if (category) { query += ' AND e.category_id = ?'; params.push(category); }
-    if (startDate) { query += ' AND e.date >= ?'; params.push(startDate); }
-    if (endDate) { query += ' AND e.date <= ?'; params.push(endDate); }
+    return ids;
+}
 
-    query += ' ORDER BY e.date DESC, e.created_at DESC';
+// ─── GET expenses for a group ─────────────────────────────────────────────────
+router.get('/group/:groupId', authenticate, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { category, startDate, endDate, limit, offset } = req.query;
 
-    if (limit) {
-        query += ' LIMIT ?'; params.push(parseInt(limit));
-        if (offset) { query += ' OFFSET ?'; params.push(parseInt(offset)); }
+        const member = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, req.userId]);
+        if (!member.rows.length) return res.status(403).json({ error: 'Not a member of this group' });
+
+        const group = await query('SELECT retention_days FROM groups_ WHERE id = $1', [groupId]);
+        const retentionDays = group.rows[0]?.retention_days;
+
+        const params = [groupId];
+        let idx = 2;
+        let conditions = '';
+
+        if (retentionDays && retentionDays > 0) {
+            conditions += ` AND e.date >= CURRENT_DATE - INTERVAL '${parseInt(retentionDays)} days'`;
+        }
+        if (category) { conditions += ` AND e.category_id = $${idx++}`; params.push(category); }
+        if (startDate) { conditions += ` AND e.date >= $${idx++}`; params.push(startDate); }
+        if (endDate) { conditions += ` AND e.date <= $${idx++}`; params.push(endDate); }
+
+        let sql = `
+            SELECT e.*, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
+                   u.name AS paid_by_name, u.avatar_color AS paid_by_color
+            FROM expenses e
+            LEFT JOIN categories c ON e.category_id = c.id
+            LEFT JOIN users u ON e.paid_by = u.id
+            WHERE e.group_id = $1 ${conditions}
+            ORDER BY e.date DESC, e.created_at DESC
+        `;
+        if (limit) {
+            sql += ` LIMIT $${idx++}`; params.push(parseInt(limit));
+            if (offset) { sql += ` OFFSET $${idx++}`; params.push(parseInt(offset)); }
+        }
+
+        const expenses = await query(sql, params);
+        const rows = expenses.rows;
+
+        // Fetch payers/splits in parallel per expense
+        await Promise.all(rows.map(async (exp) => {
+            const [p, s] = await Promise.all([
+                query('SELECT ep.*, u.name AS user_name, u.avatar_color FROM expense_payers ep JOIN users u ON ep.user_id = u.id WHERE ep.expense_id = $1', [exp.id]),
+                query('SELECT es.*, u.name AS user_name, u.avatar_color FROM expense_splits es JOIN users u ON es.user_id = u.id WHERE es.expense_id = $1', [exp.id]),
+            ]);
+            exp.payers = p.rows;
+            exp.splits = s.rows;
+        }));
+
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
-
-    const expenses = db.prepare(query).all(...params);
-
-    for (const exp of expenses) {
-        exp.payers = db.prepare(`
-      SELECT ep.*, u.name as user_name, u.avatar_color
-      FROM expense_payers ep JOIN users u ON ep.user_id = u.id WHERE ep.expense_id = ?
-    `).all(exp.id);
-        exp.splits = db.prepare(`
-      SELECT es.*, u.name as user_name, u.avatar_color
-      FROM expense_splits es JOIN users u ON es.user_id = u.id WHERE es.expense_id = ?
-    `).all(exp.id);
-    }
-
-    res.json(expenses);
 });
 
-// Get recent expenses across all groups — last 100
-router.get('/recent', authenticate, (req, res) => {
-    const db = getDb();
-    const expenses = db.prepare(`
-    SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
-           u.name as paid_by_name, u.avatar_color as paid_by_color, g.name as group_name
-    FROM expenses e
-    LEFT JOIN categories c ON e.category_id = c.id
-    LEFT JOIN users u ON e.paid_by = u.id
-    LEFT JOIN groups_ g ON e.group_id = g.id
-    JOIN group_members gm ON e.group_id = gm.group_id AND gm.user_id = ?
-    ORDER BY e.date DESC, e.created_at DESC LIMIT 100
-  `).all(req.userId);
+// ─── GET recent expenses ──────────────────────────────────────────────────────
+router.get('/recent', authenticate, async (req, res) => {
+    try {
+        const expenses = await query(`
+            SELECT e.*, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
+                   u.name AS paid_by_name, u.avatar_color AS paid_by_color, g.name AS group_name
+            FROM expenses e
+            LEFT JOIN categories c ON e.category_id = c.id
+            LEFT JOIN users u ON e.paid_by = u.id
+            LEFT JOIN groups_ g ON e.group_id = g.id
+            JOIN group_members gm ON e.group_id = gm.group_id AND gm.user_id = $1
+            ORDER BY e.date DESC, e.created_at DESC LIMIT 100
+        `, [req.userId]);
 
-    for (const exp of expenses) {
-        exp.payers = db.prepare(`
-      SELECT ep.*, u.name as user_name FROM expense_payers ep
-      JOIN users u ON ep.user_id = u.id WHERE ep.expense_id = ?
-    `).all(exp.id);
+        const rows = expenses.rows;
+        await Promise.all(rows.map(async (exp) => {
+            const p = await query(
+                'SELECT ep.*, u.name AS user_name FROM expense_payers ep JOIN users u ON ep.user_id = u.id WHERE ep.expense_id = $1',
+                [exp.id]
+            );
+            exp.payers = p.rows;
+        }));
+
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
-
-    res.json(expenses);
 });
 
-// Get all categories (system + user's custom)
-router.get('/categories', authenticate, (req, res) => {
-    const db = getDb();
-    const categories = db.prepare(`
-    SELECT * FROM categories
-    WHERE is_custom = 0 OR created_by = ?
-    ORDER BY is_custom ASC, id ASC
-  `).all(req.userId);
-    // Parse keywords JSON for each custom category
-    const result = categories.map(c => ({
-        ...c,
-        keywords: c.keywords ? JSON.parse(c.keywords) : [],
-    }));
-    res.json(result);
-});
-
-// Create a custom category
-router.post('/categories', authenticate, (req, res) => {
-    const db = getDb();
-    const { name, icon, color, keywords } = req.body;
-
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Category name is required' });
-    if (!icon) return res.status(400).json({ error: 'Category icon is required' });
-    if (!color) return res.status(400).json({ error: 'Category color is required' });
-
-    // Check for duplicate name (case-insensitive)
-    const existing = db.prepare('SELECT id FROM categories WHERE LOWER(name) = LOWER(?)').get(name.trim());
-    if (existing) return res.status(409).json({ error: 'A category with this name already exists' });
-
-    // Validate and serialise keywords
-    let kwJson = null;
-    if (Array.isArray(keywords) && keywords.length) {
-        const cleaned = keywords.map(k => k.trim().toLowerCase()).filter(Boolean);
-        if (cleaned.length) kwJson = JSON.stringify(cleaned);
+// ─── GET all categories ───────────────────────────────────────────────────────
+router.get('/categories', authenticate, async (req, res) => {
+    try {
+        const cats = await query(`
+            SELECT * FROM categories
+            WHERE is_custom = 0 OR created_by = $1
+            ORDER BY is_custom ASC, id ASC
+        `, [req.userId]);
+        // keywords is JSONB — already an array from pg, no need to JSON.parse
+        const result = cats.rows.map(c => ({
+            ...c,
+            keywords: Array.isArray(c.keywords) ? c.keywords : (c.keywords ? c.keywords : []),
+        }));
+        res.json(result);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
-
-    const result = db.prepare(
-        'INSERT INTO categories (name, icon, color, is_custom, created_by, keywords) VALUES (?, ?, ?, 1, ?, ?)'
-    ).run(name.trim(), icon.trim(), color.trim(), req.userId, kwJson);
-
-    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json({ ...category, keywords: kwJson ? JSON.parse(kwJson) : [] });
 });
 
-// Delete a custom category (created_by only)
-router.delete('/categories/:id', authenticate, (req, res) => {
-    const db = getDb();
-    const catId = parseInt(req.params.id);
+// ─── POST create custom category ─────────────────────────────────────────────
+router.post('/categories', authenticate, async (req, res) => {
+    try {
+        const { name, icon, color, keywords } = req.body;
+        if (!name || !name.trim()) return res.status(400).json({ error: 'Category name is required' });
+        if (!icon) return res.status(400).json({ error: 'Category icon is required' });
+        if (!color) return res.status(400).json({ error: 'Category color is required' });
 
-    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(catId);
-    if (!category) return res.status(404).json({ error: 'Category not found' });
-    if (!category.is_custom) return res.status(403).json({ error: 'Cannot delete system categories' });
-    if (category.created_by !== req.userId) return res.status(403).json({ error: 'Only the creator can delete this category' });
+        const existing = await query('SELECT id FROM categories WHERE LOWER(name) = LOWER($1)', [name.trim()]);
+        if (existing.rows.length) return res.status(409).json({ error: 'A category with this name already exists' });
 
-    // Move expenses using this category to "Other" (id=10)
-    db.prepare('UPDATE expenses SET category_id = 10 WHERE category_id = ?').run(catId);
-    db.prepare('DELETE FROM categories WHERE id = ?').run(catId);
+        let kwJson = null;
+        if (Array.isArray(keywords) && keywords.length) {
+            const cleaned = keywords.map(k => k.trim().toLowerCase()).filter(Boolean);
+            if (cleaned.length) kwJson = cleaned; // store as native array for JSONB
+        }
 
-    res.json({ success: true, message: 'Category deleted. Expenses moved to "Other".' });
-});
-
-// Auto-categorize — also checks custom category keywords via DB
-router.post('/auto-categorize', authenticate, (req, res) => {
-    const db = getDb();
-    const { description } = req.body;
-    const categoryName = categorize(description, db);
-    const category = db.prepare('SELECT * FROM categories WHERE name = ?').get(categoryName);
-    res.json(category || { id: 10, name: 'Other', icon: '📦', color: '#64748b' });
-});
-
-// Add expense
-router.post('/group/:groupId', authenticate, (req, res) => {
-    const db = getDb();
-    const { groupId } = req.params;
-    const { amount, description, category_id, split_type, date, payers, splits, involved_members } = req.body;
-
-    if (!description) return res.status(400).json({ error: 'Description is required' });
-    if (!payers || !payers.length) return res.status(400).json({ error: 'At least one payer is required' });
-
-    // Calculate total from payers
-    const totalAmount = payers.reduce((sum, p) => sum + Number(p.amount_paid), 0);
-    if (totalAmount <= 0) return res.status(400).json({ error: 'Total amount must be greater than 0' });
-
-    // If amount provided, verify it matches payers total (within rounding tolerance)
-    if (amount && Math.abs(Number(amount) - totalAmount) > 0.02) {
-        return res.status(400).json({ error: `Payers total (${totalAmount}) doesn't match declared amount (${amount})` });
+        const result = await query(
+            'INSERT INTO categories (name, icon, color, is_custom, created_by, keywords) VALUES ($1, $2, $3, 1, $4, $5) RETURNING *',
+            [name.trim(), icon.trim(), color.trim(), req.userId, kwJson ? JSON.stringify(kwJson) : null]
+        );
+        const cat = result.rows[0];
+        res.status(201).json({ ...cat, keywords: cat.keywords || [] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
-
-    const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, req.userId);
-    if (!isMember) return res.status(403).json({ error: 'Not a member of this group' });
-
-    // Auto-categorize if no category provided
-    let finalCategoryId = category_id;
-    if (!finalCategoryId) {
-        const catName = categorize(description);
-        const cat = db.prepare('SELECT id FROM categories WHERE name = ?').get(catName);
-        finalCategoryId = cat ? cat.id : 10;
-    }
-
-    // Primary payer = first payer (for display and legacy compat)
-    const primaryPayerId = payers[0].user_id;
-
-    const expenseId = db.transaction(() => {
-        const result = db.prepare(`
-      INSERT INTO expenses (group_id, paid_by, amount, description, category_id, split_type, date)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(groupId, primaryPayerId, totalAmount, description.trim(), finalCategoryId,
-            split_type || 'equal', date || new Date().toISOString().split('T')[0]);
-
-        insertPayersAndSplits(db, result.lastInsertRowid, groupId, totalAmount,
-            split_type || 'equal', payers, splits, involved_members);
-
-        return result.lastInsertRowid;
-    })();
-
-    const expense = getFullExpense(db, expenseId);
-
-    // Send notifications async (non-blocking)
-    const members = db.prepare(`
-    SELECT u.name, u.email FROM users u
-    JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = ?
-  `).all(groupId);
-    const group = db.prepare('SELECT name FROM groups_ WHERE id = ?').get(groupId);
-    sendExpenseNotification({
-        members,
-        expense: { ...expense, amount: totalAmount },
-        payers: expense.payers,
-        groupName: group ? group.name : '',
-        isUpdate: false,
-    }).catch(() => { });
-
-    res.status(201).json(expense);
 });
 
-// Update expense — any group member can edit
-router.put('/:id', authenticate, (req, res) => {
-    const db = getDb();
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
-    if (!expense) return res.status(404).json({ error: 'Expense not found' });
+// ─── DELETE custom category ───────────────────────────────────────────────────
+router.delete('/categories/:id', authenticate, async (req, res) => {
+    try {
+        const catId = parseInt(req.params.id);
+        const catResult = await query('SELECT * FROM categories WHERE id = $1', [catId]);
+        if (!catResult.rows.length) return res.status(404).json({ error: 'Category not found' });
+        const category = catResult.rows[0];
+        if (!category.is_custom) return res.status(403).json({ error: 'Cannot delete system categories' });
+        if (Number(category.created_by) !== Number(req.userId)) return res.status(403).json({ error: 'Only the creator can delete this category' });
 
-    // Allow any group member to edit (not just primary payer)
-    const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(expense.group_id, req.userId);
-    if (!isMember) return res.status(403).json({ error: 'Only group members can edit expenses' });
-
-    const { description, category_id, split_type, date, payers, splits, involved_members } = req.body;
-
-    // Compute total from payers if provided
-    let totalAmount = expense.amount;
-    if (payers && payers.length) {
-        totalAmount = payers.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+        await query('UPDATE expenses SET category_id = 10 WHERE category_id = $1', [catId]);
+        await query('DELETE FROM categories WHERE id = $1', [catId]);
+        res.json({ success: true, message: 'Category deleted. Expenses moved to "Other".' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
+});
 
-    db.transaction(() => {
-        const primaryPayerId = payers && payers.length ? payers[0].user_id : expense.paid_by;
+// ─── POST auto-categorize ─────────────────────────────────────────────────────
+router.post('/auto-categorize', authenticate, async (req, res) => {
+    try {
+        const { description } = req.body;
+        const categoryName = await categorize(description, true);
+        const cat = await query('SELECT * FROM categories WHERE name = $1', [categoryName]);
+        res.json(cat.rows[0] || { id: 10, name: 'Other', icon: '📦', color: '#64748b' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
 
-        db.prepare(`
-      UPDATE expenses SET amount = ?, description = ?, category_id = ?, split_type = ?, date = ?, paid_by = ? WHERE id = ?
-    `).run(
-            totalAmount,
-            description || expense.description,
-            category_id || expense.category_id,
+// ─── POST add expense ─────────────────────────────────────────────────────────
+router.post('/group/:groupId', authenticate, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { amount, description, category_id, split_type, date, payers, splits, involved_members } = req.body;
+
+        if (!description) return res.status(400).json({ error: 'Description is required' });
+        if (!payers || !payers.length) return res.status(400).json({ error: 'At least one payer is required' });
+
+        const totalAmount = payers.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+        if (totalAmount <= 0) return res.status(400).json({ error: 'Total amount must be greater than 0' });
+        if (amount && Math.abs(Number(amount) - totalAmount) > 0.02)
+            return res.status(400).json({ error: `Payers total (${totalAmount}) doesn't match declared amount (${amount})` });
+
+        const member = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, req.userId]);
+        if (!member.rows.length) return res.status(403).json({ error: 'Not a member of this group' });
+
+        // Auto-categorize if no category provided
+        let finalCategoryId = category_id;
+        if (!finalCategoryId) {
+            const catName = await categorize(description, true);
+            const cat = await query('SELECT id FROM categories WHERE name = $1', [catName]);
+            finalCategoryId = cat.rows[0]?.id || 10;
+        }
+
+        const primaryPayerId = payers[0].user_id;
+
+        const expenseId = await withTransaction(async (client) => {
+            const result = await client.query(`
+                INSERT INTO expenses (group_id, paid_by, amount, description, category_id, split_type, date)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+            `, [groupId, primaryPayerId, totalAmount, description.trim(), finalCategoryId,
+                split_type || 'equal', date || new Date().toISOString().split('T')[0]]);
+            const expenseId = result.rows[0].id;
+            await insertPayersAndSplits(client, expenseId, groupId, totalAmount, split_type || 'equal', payers, splits, involved_members);
+            return expenseId;
+        });
+
+        const expense = await getFullExpense(expenseId);
+
+        // Collect all group member IDs for equal-split fallback
+        const allGroupMembers = await query('SELECT user_id FROM group_members WHERE group_id = $1', [groupId]);
+        const allGroupMemberIds = allGroupMembers.rows.map(m => Number(m.user_id));
+        const involvedUserIds = buildInvolvedSet(payers, splits, split_type || 'equal', involved_members, allGroupMemberIds);
+
+        // Fetch group + member emails — fire-and-forget notification
+        const [membersResult, groupResult] = await Promise.all([
+            query('SELECT u.id, u.name, u.email FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = $1', [groupId]),
+            query('SELECT name FROM groups_ WHERE id = $1', [groupId]),
+        ]);
+
+        // Response is sent immediately; email happens in background
+        res.status(201).json(expense);
+
+        enqueue(() => sendExpenseNotification({
+            members: membersResult.rows,
+            involvedUserIds,
+            currentUserId: req.userId,
+            expense: { ...expense, amount: totalAmount },
+            payers: expense.payers,
+            groupName: groupResult.rows[0]?.name || '',
+            isUpdate: false,
+        }));
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// ─── PUT update expense ───────────────────────────────────────────────────────
+router.put('/:id', authenticate, async (req, res) => {
+    try {
+        const expenseResult = await query('SELECT * FROM expenses WHERE id = $1', [req.params.id]);
+        if (!expenseResult.rows.length) return res.status(404).json({ error: 'Expense not found' });
+        const expense = expenseResult.rows[0];
+
+        const member = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [expense.group_id, req.userId]);
+        if (!member.rows.length) return res.status(403).json({ error: 'Only group members can edit expenses' });
+
+        const { description, category_id, split_type, date, payers, splits, involved_members } = req.body;
+
+        let totalAmount = Number(expense.amount);
+        if (payers && payers.length) {
+            totalAmount = payers.reduce((sum, p) => sum + Number(p.amount_paid), 0);
+        }
+
+        await withTransaction(async (client) => {
+            const primaryPayerId = payers && payers.length ? payers[0].user_id : expense.paid_by;
+            await client.query(`
+                UPDATE expenses SET amount = $1, description = $2, category_id = $3, split_type = $4, date = $5, paid_by = $6
+                WHERE id = $7
+            `, [
+                totalAmount,
+                description || expense.description,
+                category_id || expense.category_id,
+                split_type || expense.split_type,
+                date || expense.date,
+                primaryPayerId,
+                expense.id,
+            ]);
+
+            await client.query('DELETE FROM expense_payers WHERE expense_id = $1', [expense.id]);
+            await client.query('DELETE FROM expense_splits WHERE expense_id = $1', [expense.id]);
+
+            if (payers && payers.length) {
+                await insertPayersAndSplits(client, expense.id, expense.group_id, totalAmount,
+                    split_type || expense.split_type, payers, splits, involved_members);
+            }
+        });
+
+        const updated = await getFullExpense(expense.id);
+
+        // Build involved set for targeted emails
+        const allGroupMembers = await query('SELECT user_id FROM group_members WHERE group_id = $1', [expense.group_id]);
+        const allGroupMemberIds = allGroupMembers.rows.map(m => Number(m.user_id));
+        const involvedUserIds = buildInvolvedSet(
+            payers || updated.payers,
+            splits || updated.splits,
             split_type || expense.split_type,
-            date || expense.date,
-            primaryPayerId,
-            expense.id
+            involved_members,
+            allGroupMemberIds
         );
 
-        // Delete old payers/splits and recreate
-        db.prepare('DELETE FROM expense_payers WHERE expense_id = ?').run(expense.id);
-        db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expense.id);
+        const [membersResult, groupResult] = await Promise.all([
+            query('SELECT u.id, u.name, u.email FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = $1', [expense.group_id]),
+            query('SELECT name FROM groups_ WHERE id = $1', [expense.group_id]),
+        ]);
 
-        if (payers && payers.length) {
-            insertPayersAndSplits(db, expense.id, expense.group_id, totalAmount,
-                split_type || expense.split_type, payers, splits, involved_members);
-        }
-    })();
+        // Respond immediately, email in background
+        res.json(updated);
 
-    const updated = getFullExpense(db, expense.id);
+        enqueue(() => sendExpenseNotification({
+            members: membersResult.rows,
+            involvedUserIds,
+            currentUserId: req.userId,
+            expense: { ...updated, amount: totalAmount },
+            payers: updated.payers,
+            groupName: groupResult.rows[0]?.name || '',
+            isUpdate: true,
+        }));
 
-    // Send notification (non-blocking)
-    const members = db.prepare(`
-    SELECT u.name, u.email FROM users u
-    JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = ?
-  `).all(expense.group_id);
-    const group = db.prepare('SELECT name FROM groups_ WHERE id = ?').get(expense.group_id);
-    sendExpenseNotification({
-        members,
-        expense: { ...updated, amount: totalAmount },
-        payers: updated.payers,
-        groupName: group ? group.name : '',
-        isUpdate: true,
-    }).catch(() => { });
-
-    res.json(updated);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
-// Delete expense — any group member can delete
-router.delete('/:id', authenticate, (req, res) => {
-    const db = getDb();
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
-    if (!expense) return res.status(404).json({ error: 'Expense not found' });
+// ─── DELETE expense ───────────────────────────────────────────────────────────
+router.delete('/:id', authenticate, async (req, res) => {
+    try {
+        const expenseResult = await query('SELECT * FROM expenses WHERE id = $1', [req.params.id]);
+        if (!expenseResult.rows.length) return res.status(404).json({ error: 'Expense not found' });
+        const expense = expenseResult.rows[0];
 
-    const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(expense.group_id, req.userId);
-    if (!isMember) return res.status(403).json({ error: 'Only group members can delete expenses' });
+        const member = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [expense.group_id, req.userId]);
+        if (!member.rows.length) return res.status(403).json({ error: 'Only group members can delete expenses' });
 
-    db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.id);
-    res.json({ success: true });
+        await query('DELETE FROM expenses WHERE id = $1', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 module.exports = router;

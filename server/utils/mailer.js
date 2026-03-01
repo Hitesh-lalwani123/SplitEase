@@ -33,7 +33,19 @@ async function sendMail(to, subject, html) {
   }
 }
 
-async function sendExpenseNotification({ members, expense, payers, groupName, isUpdate = false }) {
+/**
+ * Send expense notification.
+ *
+ * @param {object}   opts
+ * @param {Array}    opts.members        - All group members [{id, name, email}]
+ * @param {Set}      opts.involvedUserIds - User IDs involved in the expense (payers + splittees)
+ * @param {number}   opts.currentUserId  - The user who triggered the action (excluded from emails)
+ * @param {object}   opts.expense
+ * @param {Array}    opts.payers
+ * @param {string}   opts.groupName
+ * @param {boolean}  opts.isUpdate
+ */
+async function sendExpenseNotification({ members, involvedUserIds, currentUserId, expense, payers, groupName, isUpdate = false }) {
   const payerSummary = payers.map(p => `${p.user_name || p.name}: ₹${Number(p.amount_paid).toFixed(2)}`).join(', ');
   const action = isUpdate ? 'updated' : 'added';
   const actionLabel = isUpdate ? '✏️ Expense Updated' : '💸 New Expense';
@@ -48,16 +60,24 @@ async function sendExpenseNotification({ members, expense, payers, groupName, is
         <div style="color:#94a3b8;font-size:0.85rem;margin-top:6px">Paid by: <span style="color:#f1f5f9">${payerSummary}</span></div>
         <div style="color:#94a3b8;font-size:0.85rem">Category: ${expense.category_icon || ''} ${expense.category_name || 'Other'} &nbsp;·&nbsp; ${expense.date}</div>
       </div>
-      <p style="color:#64748b;font-size:0.8rem;margin:0">You receive this because you are a member of the group. <a href="${process.env.APP_URL || 'http://localhost:3000'}" style="color:#14b8a6">Open SplitEase</a></p>
+      <p style="color:#64748b;font-size:0.8rem;margin:0">You receive this because you are involved in this expense. <a href="${process.env.APP_URL || 'http://localhost:3000'}" style="color:#14b8a6">Open SplitEase</a></p>
     </div>
   `;
 
-  // Send to all members
-  for (const member of members) {
-    if (member.email) {
-      await sendMail(member.email, subject, html);
+  // Send only to INVOLVED members (payers + splittees), excluding the current user
+  const recipients = members.filter(m => {
+    if (!m.email) return false;
+    if (m.id === currentUserId) return false;  // don't notify the person who made the change
+    if (involvedUserIds && involvedUserIds.size > 0) {
+      return involvedUserIds.has(Number(m.id));
     }
-  }
+    return true;
+  });
+
+  // Send all emails in parallel
+  await Promise.allSettled(
+    recipients.map(member => sendMail(member.email, subject, html))
+  );
 }
 
 async function sendSettlementNotification({ payerEmail, payerName, payeeEmail, payeeName, amount, groupName }) {
@@ -89,8 +109,10 @@ async function sendSettlementNotification({ payerEmail, payerName, payeeEmail, p
     </div>
   `;
 
-  if (payeeEmail) await sendMail(payeeEmail, payeeSubject, payeeHtml);
-  if (payerEmail) await sendMail(payerEmail, payerSubject, payerHtml);
+  await Promise.allSettled([
+    payeeEmail ? sendMail(payeeEmail, payeeSubject, payeeHtml) : Promise.resolve(),
+    payerEmail ? sendMail(payerEmail, payerSubject, payerHtml) : Promise.resolve(),
+  ]);
 }
 
 async function sendInvitationEmail({ toEmail, inviterName, groupName, inviteUrl }) {

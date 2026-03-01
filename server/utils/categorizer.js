@@ -91,31 +91,36 @@ const CATEGORY_KEYWORDS = {
 };
 
 /**
- * Categorize a description. If `db` is provided, custom categories (with their 
- * user-defined keywords) are checked FIRST and take priority over built-in categories.
+ * Categorize a description.
+ * If `pool` is provided, custom categories (with user-defined keywords) are
+ * checked FIRST and take priority over built-in categories.
+ *
+ * This function is async when pool is provided, sync otherwise.
  */
-function categorize(description, db) {
+async function categorize(description, pool) {
     if (!description) return 'Other';
 
     const lower = description.toLowerCase().trim();
     const scores = {};
 
     // 1. Check custom categories first (they take priority)
-    if (db) {
+    if (pool) {
         try {
-            const customCats = db.prepare(
+            const { query } = require('../db/database');
+            const res = await query(
                 `SELECT name, keywords FROM categories WHERE is_custom = 1 AND keywords IS NOT NULL`
-            ).all();
+            );
 
-            for (const cat of customCats) {
+            for (const cat of res.rows) {
                 let kws = [];
-                try { kws = JSON.parse(cat.keywords); } catch { continue; }
+                try {
+                    kws = Array.isArray(cat.keywords) ? cat.keywords : JSON.parse(cat.keywords);
+                } catch { continue; }
                 if (!Array.isArray(kws)) continue;
 
                 for (const kw of kws) {
                     const kwLower = kw.toLowerCase().trim();
                     if (kwLower && lower.includes(kwLower)) {
-                        // Custom categories get a strong priority boost
                         scores[cat.name] = (scores[cat.name] || 0) + kwLower.length * 2.5;
                     }
                 }

@@ -1,7 +1,7 @@
 const express = require('express');
 const { google } = require('googleapis');
 const jwt = require('jsonwebtoken');
-const { getDb } = require('../db/database');
+const { query } = require('../db/database');
 
 const router = express.Router();
 
@@ -17,9 +17,7 @@ function getOAuthClient() {
 // Redirect to Google
 router.get('/google', (req, res) => {
     const oAuth2Client = getOAuthClient();
-    if (!oAuth2Client) {
-        return res.redirect('/?error=oauth_not_configured');
-    }
+    if (!oAuth2Client) return res.redirect('/?error=oauth_not_configured');
 
     const authUrl = oAuth2Client.generateAuthUrl({
         access_type: 'offline',
@@ -42,29 +40,25 @@ router.get('/google/callback', async (req, res) => {
 
         const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
         const { data } = await oauth2.userinfo.get();
+        const { id: googleId, email, name } = data;
 
-        const { id: googleId, email, name, picture } = data;
-
-        const db = getDb();
         const colors = ['#14b8a6', '#f97316', '#3b82f6', '#a855f7', '#ec4899', '#10b981', '#6366f1', '#eab308'];
         const avatarColor = colors[Math.floor(Math.random() * colors.length)];
 
-        let user = db.prepare('SELECT * FROM users WHERE google_id = ? OR email = ?').get(googleId, email);
+        let userResult = await query('SELECT * FROM users WHERE google_id = $1 OR email = $2', [googleId, email]);
+        let user = userResult.rows[0];
 
         if (!user) {
-            // New Google user — create account
-            const result = db.prepare(
-                'INSERT INTO users (name, email, google_id, avatar_color) VALUES (?, ?, ?, ?)'
-            ).run(name, email, googleId, avatarColor);
-            user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+            const result = await query(
+                'INSERT INTO users (name, email, google_id, avatar_color) VALUES ($1, $2, $3, $4) RETURNING *',
+                [name, email, googleId, avatarColor]
+            );
+            user = result.rows[0];
         } else if (!user.google_id) {
-            // Existing email account — link Google ID
-            db.prepare('UPDATE users SET google_id = ? WHERE id = ?').run(googleId, user.id);
+            await query('UPDATE users SET google_id = $1 WHERE id = $2', [googleId, user.id]);
         }
 
         const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-
-        // Redirect to frontend with token in URL fragment (client reads it)
         res.redirect(`/?oauth_token=${token}`);
     } catch (err) {
         console.error('Google OAuth error:', err);
