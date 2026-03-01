@@ -46,10 +46,11 @@ const Groups = {
 
     async loadDetail() {
         try {
-            const [group, expenses, balances] = await Promise.all([
+            const [group, expenses, balances, settlements] = await Promise.all([
                 API.get(`/groups/${this.currentGroupId}`),
                 API.get(`/expenses/group/${this.currentGroupId}`),
                 API.get(`/settlements/${this.currentGroupId}/balances`),
+                API.get(`/settlements/${this.currentGroupId}/settlements`).catch(() => []),
             ]);
 
             this.groupData = group;
@@ -121,10 +122,48 @@ const Groups = {
                 balanceDetails.innerHTML = '<div class="empty-state" style="padding:0.5rem">All settled up! ✨</div>';
             }
 
-            // Expenses
+            // Expenses + Settlements merged by date
             const expenseList = document.getElementById('group-expenses-list');
-            if (expenses.length) {
-                expenseList.innerHTML = expenses.map(e => Expenses.renderItem(e, false)).join('');
+
+            // Build unified activity list: tag each item with _type and _sortDate
+            const expItems = expenses.map(e => ({ ...e, _type: 'expense', _sortDate: e.date || '' }));
+            const settleItems = (settlements || []).map(s => ({ ...s, _type: 'settlement', _sortDate: s.created_at || '' }));
+            const allItems = [...expItems, ...settleItems]
+                .sort((a, b) => b._sortDate.localeCompare(a._sortDate));
+
+            if (allItems.length) {
+                expenseList.innerHTML = allItems.map(item => {
+                    if (item._type === 'settlement') {
+                        // Settlement card
+                        const dateStr = App.formatDate(item.created_at);
+                        const dateParts = (dateStr === 'Today' || dateStr === 'Yesterday')
+                            ? [dateStr, ''] : dateStr.split(' ');
+                        const isMe = Number(item.paid_by) === Number(App.currentUser?.id);
+                        const isPaidToMe = Number(item.paid_to) === Number(App.currentUser?.id);
+                        return `
+                          <div class="expense-item expense-card" style="border-left:3px solid #10b981;opacity:0.92">
+                            <div style="display:flex;flex-direction:column;align-items:center;min-width:32px;margin-right:8px;text-align:center">
+                              <span style="font-size:0.62rem;font-weight:700;color:#94a3b8;text-transform:uppercase;line-height:1.2">${dateParts[0]}</span>
+                              ${dateParts[1] ? `<span style="font-size:0.62rem;color:#64748b;line-height:1.2">${dateParts[1]}</span>` : ''}
+                            </div>
+                            <div class="expense-icon" style="background:#10b98122;color:#10b981">🤝</div>
+                            <div class="expense-main">
+                              <div class="expense-desc" style="color:#10b981;font-weight:600">
+                                ${this.escHtml(item.paid_by_name)} settled up with ${this.escHtml(item.paid_to_name)}
+                              </div>
+                              <div class="expense-meta">Settlement · ${App.currency(item.amount)}</div>
+                            </div>
+                            <div class="expense-right">
+                              <div style="text-align:right">
+                                <span class="expense-amount" style="color:#10b981">${App.currency(item.amount)}</span>
+                                ${isMe ? '<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you paid</div>' : ''}
+                                ${isPaidToMe ? '<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you received</div>' : ''}
+                              </div>
+                            </div>
+                          </div>`;
+                    }
+                    return Expenses.renderItem(item, false);
+                }).join('');
             } else {
                 expenseList.innerHTML = '<div class="empty-state">No expenses in this group yet</div>';
             }

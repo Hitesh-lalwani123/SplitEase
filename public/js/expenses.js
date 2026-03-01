@@ -569,17 +569,39 @@ const Expenses = {
     // ── Render expense item ──────────────────────────────────────────────────
     renderItem(expense, showGroup = false, opts = {}) {
         const payers = expense.payers || [];
+        const splits = expense.splits || [];
+        const myId = Number(App.currentUser?.id);
+        const totalAmt = Number(expense.amount);
+
+        // Payer display: total + who paid
         const payerText = payers.length > 1
-            ? payers.map(p => `${p.user_name} (₹${Number(p.amount_paid).toFixed(0)})`).join(', ')
+            ? payers.map(p => `${p.user_name} (${App.currency(p.amount_paid)})`).join(', ')
             : (expense.paid_by_name || 'Unknown');
 
+        // My personal share
+        const mySplit = splits.find(s => Number(s.user_id) === myId);
+        const myOwed = mySplit ? Number(mySplit.amount_owed) : 0;
+        const myPaid = payers.filter(p => Number(p.user_id) === myId)
+            .reduce((s, p) => s + Number(p.amount_paid), 0);
+        const myNet = myPaid - myOwed;
+
+        let shareHtml = '';
+        if (myNet > 0.005) {
+            shareHtml = `<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you lent ${App.currency(myNet)}</div>`;
+        } else if (myNet < -0.005) {
+            shareHtml = `<div style="font-size:0.72rem;color:#f87171;font-weight:600;margin-top:2px">you borrowed ${App.currency(Math.abs(myNet))}</div>`;
+        }
+
+        const displayAmt = myOwed > 0.005 ? myOwed : totalAmt;
+
         // Any group member can edit
-        const canEdit = !!App.currentUser && !opts.optimistic;
+        const canEdit = !!myId && !opts.optimistic;
         const editBtn = canEdit ? `<button class="btn-icon-sm" onclick="Expenses.openModal(${expense.group_id || 'null'}, ${expense.id})" title="Edit">✏️</button>` : '';
         const deleteBtn = canEdit ? `<button class="btn-icon-sm delete-btn" onclick="Expenses.deleteExpense(${expense.id})" title="Delete">🗑️</button>` : '';
 
-        const isMyExpense = payers.some(p => p.user_id === App.currentUser?.id) || expense.paid_by === App.currentUser?.id;
-        const myExpenseBadge = isMyExpense ? `<span class="my-expense-tag">you paid</span>` : '';
+        const isMyExpense = payers.some(p => Number(p.user_id) === myId) || Number(expense.paid_by) === myId;
+        // Unused now — replaced by lent/borrowed logic
+        const myExpenseBadge = '';
 
         // Attributes differ: optimistic cards use data-optimistic for Realtime.js matching;
         // real cards use data-expense-id for Socket.IO event targeting
@@ -591,22 +613,33 @@ const Expenses = {
             : '';
         const cardStyle = opts.optimistic ? ` style="opacity:0.65"` : '';
 
+        // Date: split into two small lines
+        const dateStr = App.formatDate(expense.date);
+        const dateParts = (dateStr === 'Today' || dateStr === 'Yesterday')
+            ? [dateStr, ''] : dateStr.split(' ');
+
         return `
       <div class="expense-item expense-card" ${cardAttrs}${cardStyle}>
+        <div style="display:flex;flex-direction:column;align-items:center;min-width:32px;margin-right:8px;text-align:center">
+          <span style="font-size:0.62rem;font-weight:700;color:#94a3b8;text-transform:uppercase;line-height:1.2">${dateParts[0]}</span>
+          ${dateParts[1] ? `<span style="font-size:0.62rem;color:#64748b;line-height:1.2">${dateParts[1]}</span>` : ''}
+        </div>
         <div class="expense-icon" style="background:${expense.category_color || '#64748b'}22;color:${expense.category_color || '#64748b'}">
           ${expense.category_icon || '📦'}
         </div>
         <div class="expense-main">
-          <div class="expense-desc">${this.escHtml(expense.description)} ${myExpenseBadge}${pendingOverlay}</div>
+          <div class="expense-desc">${this.escHtml(expense.description)}${pendingOverlay}</div>
           <div class="expense-meta">
             ${showGroup ? `<span>${expense.group_name || ''}</span> · ` : ''}
-            <span>paid by ${payerText}</span>
+            <span>${App.currency(totalAmt)} paid by ${payerText}</span>
             ${expense.category_name ? ` · <span>${expense.category_name}</span>` : ''}
-            <span> · ${App.formatDate(expense.date)}</span>
           </div>
         </div>
         <div class="expense-right">
-          <span class="expense-amount">₹${Number(expense.amount).toFixed(2)}</span>
+          <div style="text-align:right">
+            <span class="expense-amount">${App.currency(displayAmt)}</span>
+            ${shareHtml}
+          </div>
           <div class="expense-actions">${editBtn}${deleteBtn}</div>
         </div>
       </div>

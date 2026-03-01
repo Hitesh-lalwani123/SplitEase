@@ -52,15 +52,19 @@ const Realtime = (() => {
                 });
 
                 if (!replaced) {
-                    // Another user added this expense — prepend it
-                    const list = document.getElementById('group-expenses-list');
-                    if (list) {
-                        const emptyState = list.querySelector('.empty-state');
-                        if (emptyState) emptyState.remove();
+                    // Also check if the real card is already in DOM (added from API response)
+                    const alreadyInDom = document.querySelector(`.expense-card[data-expense-id="${expense.id}"]`);
+                    if (!alreadyInDom) {
+                        // Truly a new card from another user — prepend it
+                        const list = document.getElementById('group-expenses-list');
+                        if (list) {
+                            const emptyState = list.querySelector('.empty-state');
+                            if (emptyState) emptyState.remove();
 
-                        const div = document.createElement('div');
-                        div.innerHTML = Expenses.renderItem(expense, false);
-                        list.prepend(div.firstElementChild);
+                            const div = document.createElement('div');
+                            div.innerHTML = Expenses.renderItem(expense, false);
+                            list.prepend(div.firstElementChild);
+                        }
                     }
                 }
 
@@ -131,37 +135,43 @@ const Realtime = (() => {
     }
 
     /**
-     * Update the balances section in the group detail page
-     * using fresh balance data pushed from the worker.
+     * Refresh the balance section by fetching fresh data from the server.
+     * Called after expense:new / expense:updated / expense:deleted events.
      */
     function _updateBalancesUI(balances, groupId) {
-        // Trigger a lightweight balances refresh from server (includes simplifyDebts)
-        // We use the existing settlements endpoint which returns { transactions, balances }
         if (!Groups.currentGroupId || Number(Groups.currentGroupId) !== Number(groupId)) return;
 
-        API.get(`/settlements/${groupId}/balances`)
-            .then(data => {
-                const balanceDetails = document.getElementById('group-balance-details');
-                if (!balanceDetails) return;
+        const render = (data) => {
+            const balanceDetails = document.getElementById('group-balance-details');
+            if (!balanceDetails) return;
 
-                if (data.transactions && data.transactions.length) {
-                    balanceDetails.innerHTML = data.transactions.map(t => {
-                        const isMyDebt = t.from.id === App.currentUser?.id;
-                        return `
-                          <div class="balance-row">
-                            <strong>${Groups.escHtml(t.from.name)}</strong>
-                            <span class="arrow">→</span>
-                            <strong>${Groups.escHtml(t.to.name)}</strong>
-                            <span class="settle-amount">${App.currency(t.amount)}</span>
-                            ${isMyDebt ? `<button class="btn-settle" onclick="Settle.open(${groupId})">Settle Up</button>` : ''}
-                          </div>
-                        `;
-                    }).join('');
-                } else {
-                    balanceDetails.innerHTML = '<div class="empty-state" style="padding:0.5rem">All settled up! ✨</div>';
-                }
-            })
-            .catch(() => { }); // silent — non-critical
+            if (data.transactions && data.transactions.length) {
+                balanceDetails.innerHTML = data.transactions.map(t => {
+                    const isMyDebt = Number(t.from.id) === Number(App.currentUser?.id);
+                    return `
+                      <div class="balance-row">
+                        <strong>${Groups.escHtml(t.from.name)}</strong>
+                        <span class="arrow">→</span>
+                        <strong>${Groups.escHtml(t.to.name)}</strong>
+                        <span class="settle-amount">${App.currency(t.amount)}</span>
+                        ${isMyDebt ? `<button class="btn-settle" onclick="Settle.open(${groupId})">Settle Up</button>` : ''}
+                      </div>
+                    `;
+                }).join('');
+            } else {
+                balanceDetails.innerHTML = '<div class="empty-state" style="padding:0.5rem">All settled up! ✨</div>';
+            }
+        };
+
+        // Fetch fresh balances from server (worker has already recalculated in DB)
+        API.get(`/settlements/${groupId}/balances`)
+            .then(render)
+            .catch(() => {
+                // Retry once after 800ms in case of transient delay
+                setTimeout(() => {
+                    API.get(`/settlements/${groupId}/balances`).then(render).catch(() => { });
+                }, 800);
+            });
     }
 
     return { init, joinGroup, leaveGroup, _updateBalancesUI };

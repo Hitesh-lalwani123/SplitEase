@@ -176,13 +176,16 @@ const App = {
     },
 
     formatDate(dateStr) {
-        const d = new Date(dateStr + 'T00:00:00');
+        if (!dateStr) return '';
+        // Strip time portion if it exists (e.g. full ISO timestamp from socket events)
+        const datePart = String(dateStr).slice(0, 10);
+        const d = new Date(datePart + 'T00:00:00');
         const now = new Date();
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
 
-        if (d.toDateString() === now.toDateString()) return 'Today';
-        if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+        // if (d.toDateString() === now.toDateString()) return 'Today';
+        // if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
 
         return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
     },

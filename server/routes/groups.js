@@ -28,8 +28,8 @@ router.get('/', authenticate, async (req, res) => {
         const result = await query(`
             SELECT g.*, COUNT(gm.user_id) AS member_count
             FROM groups_ g
+            JOIN group_members ugm ON ugm.group_id = g.id AND ugm.user_id = $1
             JOIN group_members gm ON gm.group_id = g.id
-            WHERE gm.user_id = $1
             GROUP BY g.id
             ORDER BY g.created_at DESC
         `, [req.userId]);
