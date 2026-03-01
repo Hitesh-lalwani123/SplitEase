@@ -2,8 +2,7 @@ const express = require('express');
 const { query, withTransaction } = require('../db/database');
 const { authenticate } = require('../middleware/auth');
 const { categorize } = require('../utils/categorizer');
-const { sendExpenseNotification } = require('../utils/mailer');
-const { enqueue } = require('../utils/queue');
+const { expenseQueue } = require('../queue/expenseQueue');
 
 const router = express.Router();
 
@@ -305,29 +304,22 @@ router.post('/group/:groupId', authenticate, async (req, res) => {
 
         const expense = await getFullExpense(expenseId);
 
-        // Collect all group member IDs for equal-split fallback
+        // Collect involved user IDs for targeted email notifications
         const allGroupMembers = await query('SELECT user_id FROM group_members WHERE group_id = $1', [groupId]);
         const allGroupMemberIds = allGroupMembers.rows.map(m => Number(m.user_id));
         const involvedUserIds = buildInvolvedSet(payers, splits, split_type || 'equal', involved_members, allGroupMemberIds);
 
-        // Fetch group + member emails — fire-and-forget notification
-        const [membersResult, groupResult] = await Promise.all([
-            query('SELECT u.id, u.name, u.email FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = $1', [groupId]),
-            query('SELECT name FROM groups_ WHERE id = $1', [groupId]),
-        ]);
-
-        // Response is sent immediately; email happens in background
+        // ✅ Respond immediately — all heavy work (email, balance recalc, socket) is async
         res.status(201).json(expense);
 
-        enqueue(() => sendExpenseNotification({
-            members: membersResult.rows,
-            involvedUserIds,
+        // Enqueue background job (BullMQ → expenseWorker)
+        expenseQueue.add('expense.created', {
+            expenseId,
+            groupId: Number(groupId),
             currentUserId: req.userId,
-            expense: { ...expense, amount: totalAmount },
-            payers: expense.payers,
-            groupName: groupResult.rows[0]?.name || '',
+            involvedUserIds: [...involvedUserIds],
             isUpdate: false,
-        }));
+        }).catch(err => console.warn('[queue] failed to enqueue expense.created:', err.message));
 
     } catch (err) {
         console.error(err);
@@ -389,23 +381,17 @@ router.put('/:id', authenticate, async (req, res) => {
             allGroupMemberIds
         );
 
-        const [membersResult, groupResult] = await Promise.all([
-            query('SELECT u.id, u.name, u.email FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = $1', [expense.group_id]),
-            query('SELECT name FROM groups_ WHERE id = $1', [expense.group_id]),
-        ]);
-
-        // Respond immediately, email in background
+        // ✅ Respond immediately
         res.json(updated);
 
-        enqueue(() => sendExpenseNotification({
-            members: membersResult.rows,
-            involvedUserIds,
+        // Enqueue background job
+        expenseQueue.add('expense.updated', {
+            expenseId: expense.id,
+            groupId: Number(expense.group_id),
             currentUserId: req.userId,
-            expense: { ...updated, amount: totalAmount },
-            payers: updated.payers,
-            groupName: groupResult.rows[0]?.name || '',
+            involvedUserIds: [...involvedUserIds],
             isUpdate: true,
-        }));
+        }).catch(err => console.warn('[queue] failed to enqueue expense.updated:', err.message));
 
     } catch (err) {
         console.error(err);
@@ -423,8 +409,20 @@ router.delete('/:id', authenticate, async (req, res) => {
         const member = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [expense.group_id, req.userId]);
         if (!member.rows.length) return res.status(403).json({ error: 'Only group members can delete expenses' });
 
+        const groupId = Number(expense.group_id);
+        const expenseId = Number(expense.id);
+
         await query('DELETE FROM expenses WHERE id = $1', [req.params.id]);
+
+        // ✅ Respond immediately
         res.json({ success: true });
+
+        // Enqueue background job for socket broadcast + balance recalc
+        expenseQueue.add('expense.deleted', {
+            expenseId,
+            groupId,
+        }).catch(err => console.warn('[queue] failed to enqueue expense.deleted:', err.message));
+
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });

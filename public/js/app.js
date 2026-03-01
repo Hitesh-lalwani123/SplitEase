@@ -29,6 +29,8 @@ const App = {
                 this.currentUser = await API.get('/auth/me');
                 this.categories = await API.get('/expenses/categories');
                 this.showApp();
+                // Initialize real-time connection with the current JWT token
+                if (typeof Realtime !== 'undefined') Realtime.init(API.token);
                 // Accept any pending invite after auth
                 await Invitations.acceptPendingToken();
                 this.navigate('dashboard');

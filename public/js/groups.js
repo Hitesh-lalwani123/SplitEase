@@ -30,6 +30,9 @@ const Groups = {
     async openDetail(groupId) {
         this.currentGroupId = groupId;
 
+        // Join Socket.IO room for real-time expense updates
+        if (typeof Realtime !== 'undefined') Realtime.joinGroup(groupId);
+
         // Switch pages
         document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
         document.getElementById('group-detail-page').classList.add('active');

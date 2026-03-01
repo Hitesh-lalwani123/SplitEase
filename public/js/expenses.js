@@ -484,57 +484,120 @@ const Expenses = {
                 involved_members: involvedMembers,
             };
 
-            try {
-                const btn = document.getElementById('expense-submit-btn');
-                btn.disabled = true; btn.textContent = 'Saving...';
 
+            const btn = document.getElementById('expense-submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            // ──────────── Optimistic UI (new expense only) ────────────
+            let optimisticCard = null;
+            if (!this.editingId) {
+                const paidByMember = this.groupMembers.find(m => m.id === payersRaw[0].user_id);
+                const selectedCat = (App.categories || []).find(c => c.id === this.selectedCategoryId);
+                const optimisticExpense = {
+                    id: null,
+                    group_id: groupId,
+                    description,
+                    amount: totalAmount,
+                    date: document.getElementById('expense-date').value || new Date().toISOString().split('T')[0],
+                    paid_by_name: paidByMember?.name || App.currentUser?.name || 'You',
+                    paid_by: payersRaw[0].user_id,
+                    category_icon: selectedCat?.icon || '📦',
+                    category_color: selectedCat?.color || '#64748b',
+                    category_name: selectedCat?.name || null,
+                    payers: payersRaw.map(p => ({
+                        user_id: p.user_id,
+                        user_name: this.groupMembers.find(m => m.id === p.user_id)?.name || 'Unknown',
+                        amount_paid: p.amount_paid,
+                    })),
+                };
+
+                const expenseList = document.getElementById('group-expenses-list');
+                if (expenseList) {
+                    const emptyState = expenseList.querySelector('.empty-state');
+                    if (emptyState) emptyState.remove();
+
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = this.renderItem(optimisticExpense, false, { optimistic: true });
+                    optimisticCard = wrapper.firstElementChild;
+                    expenseList.prepend(optimisticCard);
+                    // Close modal immediately for instant feel
+                    App.closeModal('expense-modal');
+                }
+            }
+
+            try {
                 if (this.editingId) {
-                    await API.put(`/expenses/${this.editingId}`, payload);
+                    const updated = await API.put(`/expenses/${this.editingId}`, payload);
                     App.toast('Expense updated! ✏️');
+                    App.closeModal('expense-modal');
+                    // Replace existing card with updated data
+                    const existingCard = document.querySelector(`.expense-card[data-expense-id="${this.editingId}"]`);
+                    if (existingCard) existingCard.outerHTML = this.renderItem(updated, false);
+                    if (Groups.currentGroupId) Groups.loadDetail();
                 } else {
-                    await API.post(`/expenses/group/${groupId}`, payload);
+                    const saved = await API.post(`/expenses/group/${groupId}`, payload);
                     App.toast('Expense added! 💸');
+                    // Replace optimistic card with real saved data
+                    if (optimisticCard && optimisticCard.parentNode) {
+                        optimisticCard.outerHTML = this.renderItem(saved, false);
+                    }
                 }
 
-                App.closeModal('expense-modal');
-
-                // Refresh relevant views
-                if (Groups.currentGroupId) Groups.loadDetail();
+                // Refresh dashboard / activity if visible
                 if (App.currentPage === 'dashboard') Dashboard.load();
                 if (App.currentPage === 'activity') App.loadActivity();
 
             } catch (err) {
                 App.toast(err.message || 'Failed to save expense', 'error');
+                // Rollback: remove optimistic card with fade
+                if (optimisticCard && optimisticCard.parentNode) {
+                    optimisticCard.style.transition = 'opacity 0.3s';
+                    optimisticCard.style.opacity = '0';
+                    setTimeout(() => optimisticCard.remove(), 300);
+                }
+                // Re-open modal so user can retry
+                if (!this.editingId) App.openModal('expense-modal');
             } finally {
-                const btn = document.getElementById('expense-submit-btn');
                 btn.disabled = false;
                 btn.textContent = this.editingId ? 'Update Expense' : 'Save Expense';
             }
         });
     },
 
+
     // ── Render expense item ──────────────────────────────────────────────────
-    renderItem(expense, showGroup = false) {
+    renderItem(expense, showGroup = false, opts = {}) {
         const payers = expense.payers || [];
         const payerText = payers.length > 1
             ? payers.map(p => `${p.user_name} (₹${Number(p.amount_paid).toFixed(0)})`).join(', ')
             : (expense.paid_by_name || 'Unknown');
 
         // Any group member can edit
-        const canEdit = !!App.currentUser;
+        const canEdit = !!App.currentUser && !opts.optimistic;
         const editBtn = canEdit ? `<button class="btn-icon-sm" onclick="Expenses.openModal(${expense.group_id || 'null'}, ${expense.id})" title="Edit">✏️</button>` : '';
         const deleteBtn = canEdit ? `<button class="btn-icon-sm delete-btn" onclick="Expenses.deleteExpense(${expense.id})" title="Delete">🗑️</button>` : '';
 
         const isMyExpense = payers.some(p => p.user_id === App.currentUser?.id) || expense.paid_by === App.currentUser?.id;
         const myExpenseBadge = isMyExpense ? `<span class="my-expense-tag">you paid</span>` : '';
 
+        // Attributes differ: optimistic cards use data-optimistic for Realtime.js matching;
+        // real cards use data-expense-id for Socket.IO event targeting
+        const cardAttrs = opts.optimistic
+            ? `data-optimistic="true" data-description="${this.escHtml(expense.description)}" data-amount="${expense.amount}"`
+            : `data-expense-id="${expense.id}"`;
+        const pendingOverlay = opts.optimistic
+            ? `<span style="font-size:0.7rem;color:#94a3b8;margin-left:6px">Saving…</span>`
+            : '';
+        const cardStyle = opts.optimistic ? ` style="opacity:0.65"` : '';
+
         return `
-      <div class="expense-item" id="exp-${expense.id}">
+      <div class="expense-item expense-card" ${cardAttrs}${cardStyle}>
         <div class="expense-icon" style="background:${expense.category_color || '#64748b'}22;color:${expense.category_color || '#64748b'}">
           ${expense.category_icon || '📦'}
         </div>
         <div class="expense-main">
-          <div class="expense-desc">${this.escHtml(expense.description)} ${myExpenseBadge}</div>
+          <div class="expense-desc">${this.escHtml(expense.description)} ${myExpenseBadge}${pendingOverlay}</div>
           <div class="expense-meta">
             ${showGroup ? `<span>${expense.group_name || ''}</span> · ` : ''}
             <span>paid by ${payerText}</span>
