@@ -181,7 +181,10 @@
 
         <!-- Admin actions (hidden for non-admins) -->
         <div id="admin-actions-row" style="display:none;margin-bottom:0.75rem;gap:0.5rem;flex-wrap:wrap">
-          <button id="group-settings-btn" class="btn btn-ghost btn-sm" style="display:none">⚙️ Group Settings</button>
+        </div>
+        <!-- Settings button — visible to ALL members -->
+        <div style="margin-bottom:0.75rem">
+          <button id="group-settings-btn" class="btn btn-ghost btn-sm">⚙️ Group Settings</button>
         </div>
         <!-- Leave group (non-owner members only) -->
         <div id="leave-group-row" style="display:none;margin-bottom:0.75rem">
@@ -206,16 +209,7 @@
           <div id="join-requests-list"></div>
         </div>
 
-        <div id="group-members-section" class="members-section">
-          <div class="section-header">
-            <h3>Members</h3>
-            <div style="display:flex;gap:0.5rem">
-              <button id="add-member-btn" class="btn btn-ghost btn-sm">+ Add</button>
-              <button id="invite-member-btn" class="btn btn-ghost btn-sm">✉ Invite</button>
-            </div>
-          </div>
-          <div id="group-members-list" class="members-list"></div>
-        </div>
+
 
         <div id="group-balances-section" class="balances-section">
           <div class="section-header">
@@ -403,24 +397,6 @@
     </div>
   </div>
 
-  <!-- Add Member Modal -->
-  <div id="member-modal" class="modal">
-    <div class="modal-overlay"></div>
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>Add Member</h3>
-        <button class="modal-close">&times;</button>
-      </div>
-      <form id="member-form">
-        <div class="form-group">
-          <label>Member's Email</label>
-          <input type="email" id="member-email-input" placeholder="friend@example.com" required>
-        </div>
-        <p class="form-hint">The person must have a SplitEase account to add directly</p>
-        <button type="submit" class="btn btn-primary btn-full">Add Member</button>
-      </form>
-    </div>
-  </div>
 
   <!-- Invite by Email Modal -->
   <div id="invite-modal" class="modal">
@@ -508,6 +484,46 @@
 
         <button type="submit" class="btn btn-primary btn-full">Save Changes</button>
       </form>
+
+      <!-- Members List (inside settings) -->
+      <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.08)">
+        <h4 style="font-size:0.95rem;margin:0 0 0.75rem">👥 Members</h4>
+        <div id="group-members-list" class="members-list"></div>
+      </div>
+
+      <!-- Join Code — visible to ALL members -->
+      <div id="settings-member-invite-row"
+        style="margin-top:1rem;padding:0.75rem;background:rgba(20,184,166,0.08);border:1px solid rgba(20,184,166,0.25);border-radius:10px">
+        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.35rem">🔗 Group Join Code — share this to
+          invite others</div>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          <span id="settings-member-join-code"
+            style="font-size:1.25rem;font-weight:800;letter-spacing:0.25em;color:#14b8a6;flex:1">—</span>
+          <button id="copy-member-join-code-btn" class="btn btn-ghost btn-sm">📋 Copy</button>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.35rem">New members will need admin approval
+          after using this code</div>
+      </div>
+
+      <!-- Member Management (admin only: add by email + join code) -->
+      <div id="settings-member-management"
+        style="display:none;margin-top:1.25rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.08)">
+        <h4 style="font-size:0.95rem;margin:0 0 0.75rem">➕ Add by Email</h4>
+
+        <!-- Add by email -->
+        <form id="member-form" style="display:flex;gap:0.5rem;margin-bottom:0.75rem">
+          <input type="email" id="member-email-input" placeholder="Add by email…" class="flex-1"
+            style="flex:1;padding:0.55rem 0.75rem;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:var(--text);font-size:0.88rem">
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </form>
+
+        <!-- Join code display -->
+        <div id="settings-join-code-row" style="display:none;margin-top:0.5rem">
+          <span style="font-size:0.8rem;color:var(--text-muted)">Join code: </span>
+          <span id="settings-join-code-value" style="font-weight:700;letter-spacing:0.15em;color:#14b8a6"></span>
+          <button id="copy-settings-code-btn" class="btn btn-ghost btn-sm" style="margin-left:0.5rem">📋</button>
+        </div>
+      </div>
 
       <!-- Custom Categories -->
       <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.08)">
