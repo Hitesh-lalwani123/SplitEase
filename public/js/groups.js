@@ -30,6 +30,9 @@ const Groups = {
     async openDetail(groupId) {
         this.currentGroupId = groupId;
 
+        // Join Socket.IO room for real-time expense updates
+        if (typeof Realtime !== 'undefined') Realtime.joinGroup(groupId);
+
         // Switch pages
         document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
         document.getElementById('group-detail-page').classList.add('active');
@@ -43,10 +46,11 @@ const Groups = {
 
     async loadDetail() {
         try {
-            const [group, expenses, balances] = await Promise.all([
+            const [group, expenses, balances, settlements] = await Promise.all([
                 API.get(`/groups/${this.currentGroupId}`),
                 API.get(`/expenses/group/${this.currentGroupId}`),
                 API.get(`/settlements/${this.currentGroupId}/balances`),
+                API.get(`/settlements/${this.currentGroupId}/settlements`).catch(() => []),
             ]);
 
             this.groupData = group;
@@ -58,25 +62,27 @@ const Groups = {
 
             // Admin controls
             document.getElementById('admin-actions-row').style.display = isAdmin ? 'flex' : 'none';
-            document.getElementById('group-settings-btn').style.display = isAdmin ? '' : 'none';
+            // Settings button visible to ALL members (view-only for non-admins)
+            document.getElementById('group-settings-btn').style.display = '';
 
             // Leave group row — visible to non-owner members
             const leaveRow = document.getElementById('leave-group-row');
             if (leaveRow) leaveRow.style.display = isMember ? '' : 'none';
 
-            // Members
+            // Members (inside settings modal — element always exists in DOM)
             const membersList = document.getElementById('group-members-list');
-            membersList.innerHTML = group.members.map(m => {
-                const isCreator = m.id === group.created_by;
-                const canManage = isAdmin && m.id !== App.currentUser?.id;
-                const isTheirAdmin = m.role === 'admin';
+            if (membersList) {
+                membersList.innerHTML = group.members.map(m => {
+                    const isCreator = m.id === group.created_by;
+                    const canManage = isAdmin && m.id !== App.currentUser?.id;
+                    const isTheirAdmin = m.role === 'admin';
 
-                return `
+                    return `
           <div class="member-chip member-chip-full" id="member-${m.id}">
             <div class="member-avatar" style="background:${m.avatar_color || '#14b8a6'}">
               ${m.profile_photo
-                        ? `<img src="${m.profile_photo}" class="avatar-img" alt="${m.name[0]}">`
-                        : m.name.charAt(0).toUpperCase()}
+                            ? `<img src="${m.profile_photo}" class="avatar-img" alt="${m.name[0]}">`
+                            : m.name.charAt(0).toUpperCase()}
             </div>
             <div class="member-info-wrap">
               <span class="member-name">${this.escHtml(m.name)}</span>
@@ -85,16 +91,17 @@ const Groups = {
             ${canManage ? `
               <div class="member-actions">
                 ${!isCreator && isTheirAdmin
-                            ? `<button class="btn btn-ghost btn-sm" onclick="Groups.setRole(${m.id},'member')" title="Demote to member">↓ Member</button>`
-                            : !isCreator && !isTheirAdmin
-                                ? `<button class="btn btn-ghost btn-sm" onclick="Groups.setRole(${m.id},'admin')" title="Make admin">↑ Admin</button>`
-                                : ''}
+                                ? `<button class="btn btn-ghost btn-sm" onclick="Groups.setRole(${m.id},'member')" title="Demote to member">↓ Member</button>`
+                                : !isCreator && !isTheirAdmin
+                                    ? `<button class="btn btn-ghost btn-sm" onclick="Groups.setRole(${m.id},'admin')" title="Make admin">↑ Admin</button>`
+                                    : ''}
                 ${!isCreator ? `<button class="btn btn-danger btn-sm" onclick="Groups.removeMember(${m.id}, '${this.escHtml(m.name)}')" title="Remove">✕</button>` : ''}
               </div>
             ` : ''}
           </div>
         `;
-            }).join('');
+                }).join('');
+            }
 
             // Balances
             const balanceDetails = document.getElementById('group-balance-details');
@@ -115,10 +122,48 @@ const Groups = {
                 balanceDetails.innerHTML = '<div class="empty-state" style="padding:0.5rem">All settled up! ✨</div>';
             }
 
-            // Expenses
+            // Expenses + Settlements merged by date
             const expenseList = document.getElementById('group-expenses-list');
-            if (expenses.length) {
-                expenseList.innerHTML = expenses.map(e => Expenses.renderItem(e, false)).join('');
+
+            // Build unified activity list: tag each item with _type and _sortDate
+            const expItems = expenses.map(e => ({ ...e, _type: 'expense', _sortDate: e.date || '' }));
+            const settleItems = (settlements || []).map(s => ({ ...s, _type: 'settlement', _sortDate: s.created_at || '' }));
+            const allItems = [...expItems, ...settleItems]
+                .sort((a, b) => b._sortDate.localeCompare(a._sortDate));
+
+            if (allItems.length) {
+                expenseList.innerHTML = allItems.map(item => {
+                    if (item._type === 'settlement') {
+                        // Settlement card
+                        const dateStr = App.formatDate(item.created_at);
+                        const dateParts = (dateStr === 'Today' || dateStr === 'Yesterday')
+                            ? [dateStr, ''] : dateStr.split(' ');
+                        const isMe = Number(item.paid_by) === Number(App.currentUser?.id);
+                        const isPaidToMe = Number(item.paid_to) === Number(App.currentUser?.id);
+                        return `
+                          <div class="expense-item expense-card" style="border-left:3px solid #10b981;opacity:0.92">
+                            <div style="display:flex;flex-direction:column;align-items:center;min-width:32px;margin-right:8px;text-align:center">
+                              <span style="font-size:0.62rem;font-weight:700;color:#94a3b8;text-transform:uppercase;line-height:1.2">${dateParts[0]}</span>
+                              ${dateParts[1] ? `<span style="font-size:0.62rem;color:#64748b;line-height:1.2">${dateParts[1]}</span>` : ''}
+                            </div>
+                            <div class="expense-icon" style="background:#10b98122;color:#10b981">🤝</div>
+                            <div class="expense-main">
+                              <div class="expense-desc" style="color:#10b981;font-weight:600">
+                                ${this.escHtml(item.paid_by_name)} settled up with ${this.escHtml(item.paid_to_name)}
+                              </div>
+                              <div class="expense-meta">Settlement · ${App.currency(item.amount)}</div>
+                            </div>
+                            <div class="expense-right">
+                              <div style="text-align:right">
+                                <span class="expense-amount" style="color:#10b981">${App.currency(item.amount)}</span>
+                                ${isMe ? '<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you paid</div>' : ''}
+                                ${isPaidToMe ? '<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you received</div>' : ''}
+                              </div>
+                            </div>
+                          </div>`;
+                    }
+                    return Expenses.renderItem(item, false);
+                }).join('');
             } else {
                 expenseList.innerHTML = '<div class="empty-state">No expenses in this group yet</div>';
             }
@@ -166,19 +211,21 @@ const Groups = {
     async requestLeave() {
         if (!this.currentGroupId) return;
         if (!confirm('Request to leave this group?\n\nAn admin needs to approve. Your expense history will be preserved.')) return;
+
+        const btn = document.getElementById('leave-group-btn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+
         try {
             const res = await API.post(`/groups/${this.currentGroupId}/leave`);
             App.toast(res.message || 'Leave request sent ⏳');
             // Show pending badge
             document.getElementById('leave-pending-badge').style.display = '';
-            document.getElementById('leave-group-btn').disabled = true;
-            document.getElementById('leave-group-btn').textContent = '⏳ Leave Requested';
+            if (btn) btn.textContent = '⏳ Leave Requested';
+            // leave btn stays disabled — request is pending
         } catch (err) {
-            if (err.message.includes('unsettled')) {
-                App.toast('❌ ' + err.message, 'error');
-            } else {
-                App.toast(err.message, 'error');
-            }
+            App.toast('❌ ' + err.message, 'error');
+            // Re-enable button so they can try again after settling
+            if (btn) { btn.disabled = false; btn.textContent = '🚪 Leave Group'; }
         }
     },
 
@@ -290,11 +337,21 @@ const GroupSettings = {
         const group = Groups.groupData;
         if (!group) return;
 
+        const isAdmin = group.myRole === 'admin';
         const isOwner = group.created_by === App.currentUser?.id;
 
         // Pre-fill fields
         document.getElementById('settings-group-name').value = group.name;
         document.getElementById('settings-group-desc').value = group.description || '';
+
+        // Read-only mode for non-admins
+        const readOnly = !isAdmin;
+        ['settings-group-name', 'settings-group-desc'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.readOnly = readOnly;
+        });
+        const saveBtn = document.querySelector('#group-settings-form button[type="submit"]');
+        if (saveBtn) saveBtn.style.display = readOnly ? 'none' : '';
 
         // Retention — only shown to owner
         const retentionWrap = document.getElementById('settings-retention-wrap');
@@ -302,15 +359,33 @@ const GroupSettings = {
             retentionWrap.style.display = '';
             const retSel = document.getElementById('settings-retention');
             const currentVal = group.retention_days ? String(group.retention_days) : '';
-            // Pick the closest option
             const options = ['', '30', '90', '180', '365', '730'];
             retSel.value = options.includes(currentVal) ? currentVal : '';
+            retSel.disabled = false;
         } else {
             retentionWrap.style.display = 'none';
         }
 
         // Danger zone — only shown to owner
         document.getElementById('settings-danger-zone').style.display = isOwner ? '' : 'none';
+
+        // Member management — shown to admins
+        const memberMgmt = document.getElementById('settings-member-management');
+        if (memberMgmt) memberMgmt.style.display = isAdmin ? '' : 'none';
+
+        // Join code — show to all members
+        const memberJoinCode = document.getElementById('settings-member-join-code');
+        if (memberJoinCode) memberJoinCode.textContent = group.join_code || '—';
+
+        // Show join code inside admin section too
+        if (isAdmin && group.join_code) {
+            const codeRow = document.getElementById('settings-join-code-row');
+            const codeVal = document.getElementById('settings-join-code-value');
+            if (codeRow && codeVal) {
+                codeVal.textContent = group.join_code;
+                codeRow.style.display = '';
+            }
+        }
 
         // Load custom categories
         this.loadCustomCategories();
@@ -430,28 +505,28 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Back button
-    document.getElementById('back-to-groups').addEventListener('click', () => {
+    document.getElementById('back-to-groups')?.addEventListener('click', () => {
         App.navigate('groups');
     });
 
     // Group Settings button
-    document.getElementById('group-settings-btn').addEventListener('click', () => {
+    document.getElementById('group-settings-btn')?.addEventListener('click', () => {
         GroupSettings.open();
     });
 
     // Group Settings form submit
-    document.getElementById('group-settings-form').addEventListener('submit', (e) => {
+    document.getElementById('group-settings-form')?.addEventListener('submit', (e) => {
         e.preventDefault();
         GroupSettings.save();
     });
 
     // Delete group button
-    document.getElementById('delete-group-btn').addEventListener('click', () => {
+    document.getElementById('delete-group-btn')?.addEventListener('click', () => {
         GroupSettings.deleteGroup();
     });
 
     // Open custom category modal
-    document.getElementById('open-custom-category-btn').addEventListener('click', (e) => {
+    document.getElementById('open-custom-category-btn')?.addEventListener('click', (e) => {
         e.preventDefault();
         document.getElementById('custom-category-form').reset();
         document.getElementById('custom-cat-color').value = '#14b8a6';
@@ -466,12 +541,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Custom category color preview
-    document.getElementById('custom-cat-color').addEventListener('input', (e) => {
+    document.getElementById('custom-cat-color')?.addEventListener('input', (e) => {
         document.getElementById('custom-cat-color-preview').textContent = e.target.value;
     });
 
     // Custom category form submit
-    document.getElementById('custom-category-form').addEventListener('submit', async (e) => {
+    document.getElementById('custom-category-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = document.getElementById('custom-cat-name').value.trim();
         const icon = document.getElementById('custom-cat-icon').value.trim();
@@ -515,29 +590,33 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Add member (by email — admin only)
-    document.getElementById('add-member-btn').addEventListener('click', () => {
-        App.openModal('member-modal');
-    });
-
-    document.getElementById('member-form').addEventListener('submit', async (e) => {
+    // Add member (by email — admin only, inside group settings)
+    document.getElementById('member-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('member-email-input').value.trim();
         if (!email || !Groups.currentGroupId) return;
 
         try {
             await API.post(`/groups/${Groups.currentGroupId}/members`, { email });
-            App.closeModal('member-modal');
-            App.toast('Member added!');
-            document.getElementById('member-form').reset();
+            App.toast('Member added! 👋');
+            document.getElementById('member-email-input').value = '';
             Groups.loadDetail();
         } catch (err) {
             App.toast(err.message, 'error');
         }
     });
 
-    // Invite member by email
-    document.getElementById('invite-member-btn').addEventListener('click', () => {
+    // Copy join code — all-members card
+    document.getElementById('copy-member-join-code-btn')?.addEventListener('click', () => {
+        const code = document.getElementById('settings-member-join-code')?.textContent;
+        if (code && code !== '—') {
+            navigator.clipboard.writeText(code).then(() => App.toast('Join code copied! 📋'))
+                .catch(() => App.toast('Code: ' + code));
+        }
+    });
+
+    // Invite member by email (admin only — opens full invite modal)
+    document.getElementById('invite-member-btn')?.addEventListener('click', () => {
         Invitations.currentGroupId = Groups.currentGroupId;
         Invitations.loadPendingInvites();
 
@@ -550,7 +629,17 @@ document.addEventListener('DOMContentLoaded', () => {
             codeEl.style.display = '';
         }
 
+        App.closeModal('group-settings-modal'); // close settings first
         App.openModal('invite-modal');
+    });
+
+    // Copy join code (inside settings modal)
+    document.getElementById('copy-settings-code-btn')?.addEventListener('click', () => {
+        const code = document.getElementById('settings-join-code-value')?.textContent;
+        if (code) {
+            navigator.clipboard.writeText(code).then(() => App.toast('Join code copied! 📋'))
+                .catch(() => App.toast('Code: ' + code));
+        }
     });
 
     // Copy join code inside invite modal
@@ -563,12 +652,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Group add expense — pre-select current group
-    document.getElementById('group-add-expense-btn').addEventListener('click', () => {
+    document.getElementById('group-add-expense-btn')?.addEventListener('click', () => {
         Expenses.openModal(Groups.currentGroupId);
     });
 
     // Settle up
-    document.getElementById('group-settle-btn').addEventListener('click', () => {
+    document.getElementById('group-settle-btn')?.addEventListener('click', () => {
         Settle.open(Groups.currentGroupId);
     });
 

@@ -28,8 +28,8 @@ router.get('/', authenticate, async (req, res) => {
         const result = await query(`
             SELECT g.*, COUNT(gm.user_id) AS member_count
             FROM groups_ g
+            JOIN group_members ugm ON ugm.group_id = g.id AND ugm.user_id = $1
             JOIN group_members gm ON gm.group_id = g.id
-            WHERE gm.user_id = $1
             GROUP BY g.id
             ORDER BY g.created_at DESC
         `, [req.userId]);
@@ -177,9 +177,22 @@ router.delete('/:id/members/:uid', authenticate, async (req, res) => {
         const targetId = parseInt(req.params.uid);
         if (!await isAdmin(groupId, req.userId)) return res.status(403).json({ error: 'Admin only' });
 
-        const group = await query('SELECT created_by FROM groups_ WHERE id = $1', [groupId]);
+        const group = await query('SELECT * FROM groups_ WHERE id = $1', [groupId]);
         if (Number(targetId) === Number(group.rows[0].created_by))
             return res.status(403).json({ error: 'Cannot remove the group creator' });
+
+        // ── Balance guard: block removal if member has any outstanding balance ──
+        const balances = await calculateGroupBalances(groupId, group.rows[0]?.retention_days);
+        const memberBalance = balances.find(b => Number(b.userId) === Number(targetId));
+        if (memberBalance && Math.abs(memberBalance.amount) > 0.01) {
+            const direction = memberBalance.amount > 0
+                ? `is owed ₹${memberBalance.amount.toFixed(2)}`
+                : `owes ₹${Math.abs(memberBalance.amount).toFixed(2)}`;
+            return res.status(400).json({
+                error: `This member ${direction} in the group. All balances must be settled before they can be removed.`,
+                balance: memberBalance.amount,
+            });
+        }
 
         await query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, targetId]);
         res.json({ message: 'Member removed' });
@@ -333,16 +346,18 @@ router.post('/:id/leave', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'As the owner, you cannot leave. Delete the group or transfer ownership instead.' });
 
         const group = await query('SELECT * FROM groups_ WHERE id = $1', [groupId]);
-        const balances = await calculateGroupBalances(groupId, group.rows[0]?.retention_days);
-        const transactions = await simplifyDebts(balances);
 
-        const myDebts = transactions.filter(t => Number(t.from.id) === Number(req.userId) && t.amount > 1);
-        if (myDebts.length > 0) {
-            const total = myDebts.reduce((s, t) => s + t.amount, 0);
+        // ── Balance guard: block leave if user has any outstanding balance ──
+        const balances = await calculateGroupBalances(groupId, group.rows[0]?.retention_days);
+        const myBalance = balances.find(b => Number(b.userId) === Number(req.userId));
+        if (myBalance && Math.abs(myBalance.amount) > 0.01) {
+            const direction = myBalance.amount > 0
+                ? `You are owed ₹${myBalance.amount.toFixed(2)} in this group. Collect your dues before leaving.`
+                : `You owe ₹${Math.abs(myBalance.amount).toFixed(2)} in this group. Please settle up before leaving.`;
             return res.status(400).json({
-                error: `You have unsettled debts of ₹${total.toFixed(2)}. Please settle up before leaving.`,
+                error: direction,
                 unsettled: true,
-                amount: total,
+                balance: myBalance.amount,
             });
         }
 

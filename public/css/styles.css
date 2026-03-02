@@ -1992,6 +1992,7 @@ textarea {
 .chart-wrap {
   position: relative;
   width: 100%;
+  height: 260px;
   max-height: 260px;
 }
 
@@ -2000,6 +2001,7 @@ textarea {
 }
 
 .chart-wrap-tall {
+  height: 300px;
   max-height: 300px;
 }
 
@@ -2007,8 +2009,8 @@ textarea {
   max-height: 300px;
 }
 
-/* Responsive: stack to single column on narrow screens */
-@media (max-width: 520px) {
+/* Responsive: stack to single column on tablets and below */
+@media (max-width: 768px) {
   .analytics-charts-grid {
     grid-template-columns: 1fr;
   }

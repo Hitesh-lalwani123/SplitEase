@@ -1,35 +1,39 @@
 // Analytics Charts — full rewrite with view modes, date range picker, group selector
+
+// Disable all Chart.js animations globally (no expand/shrink on load or update)
+if (typeof Chart !== 'undefined') Chart.defaults.animation = false;
+
 const Charts = {
-    instances: {},   // chart instances keyed by canvas id
-    groups: [],      // user's groups list
+  instances: {},   // chart instances keyed by canvas id
+  groups: [],      // user's groups list
 
-    // ── Init ─────────────────────────────────────────────────────────────────
-    async init() {
-        await this.loadGroups();
-        this.buildControls();
-        this.bindEvents();
-        this.setDefaultDates();
-        this.load();
-    },
+  // ── Init ─────────────────────────────────────────────────────────────────
+  async init() {
+    await this.loadGroups();
+    this.buildControls();
+    this.bindEvents();
+    this.setDefaultDates();
+    this.load();
+  },
 
-    async loadGroups() {
-        try {
-            this.groups = await API.get('/groups');
-        } catch (e) {
-            this.groups = [];
-        }
-    },
+  async loadGroups() {
+    try {
+      this.groups = await API.get('/groups');
+    } catch (e) {
+      this.groups = [];
+    }
+  },
 
-    // ── Build controls HTML ───────────────────────────────────────────────────
-    buildControls() {
-        const wrap = document.getElementById('analytics-controls');
-        if (!wrap) return;
+  // ── Build controls HTML ───────────────────────────────────────────────────
+  buildControls() {
+    const wrap = document.getElementById('analytics-controls');
+    if (!wrap) return;
 
-        const groupOptions = this.groups.map(g =>
-            `<option value="${g.id}">${this.esc(g.name)}</option>`
-        ).join('');
+    const groupOptions = this.groups.map(g =>
+      `<option value="${g.id}">${this.esc(g.name)}</option>`
+    ).join('');
 
-        wrap.innerHTML = `
+    wrap.innerHTML = `
       <div class="analytics-controls-row">
 
         <!-- View mode -->
@@ -71,82 +75,83 @@ const Charts = {
         <button id="analytics-apply-btn" class="btn btn-primary btn-sm">Apply</button>
       </div>
     `;
-    },
+  },
 
-    bindEvents() {
-        document.getElementById('analytics-controls')?.addEventListener('change', (e) => {
-            if (e.target.id === 'analytics-view-mode') {
-                const isGroup = e.target.value === 'group';
-                document.getElementById('analytics-group-wrap').style.display = isGroup ? '' : 'none';
-            }
-        });
+  bindEvents() {
+    document.getElementById('analytics-controls')?.addEventListener('change', (e) => {
+      if (e.target.id === 'analytics-view-mode') {
+        const isGroup = e.target.value === 'group';
+        document.getElementById('analytics-group-wrap').style.display = isGroup ? '' : 'none';
+      }
+    });
 
-        document.getElementById('analytics-controls')?.addEventListener('click', (e) => {
-            if (e.target.classList.contains('shortcut-btn')) {
-                const days = parseInt(e.target.dataset.days);
-                const end = new Date();
-                const start = new Date();
-                start.setDate(end.getDate() - days);
-                document.getElementById('analytics-start').value = start.toISOString().split('T')[0];
-                document.getElementById('analytics-end').value = end.toISOString().split('T')[0];
-            }
-            if (e.target.id === 'analytics-apply-btn') {
-                this.load();
-            }
-        });
-    },
-
-    setDefaultDates() {
+    document.getElementById('analytics-controls')?.addEventListener('click', (e) => {
+      if (e.target.classList.contains('shortcut-btn')) {
+        const days = parseInt(e.target.dataset.days);
         const end = new Date();
         const start = new Date();
-        start.setMonth(end.getMonth() - 3);
-        const s = document.getElementById('analytics-start');
-        const e2 = document.getElementById('analytics-end');
-        if (s) s.value = start.toISOString().split('T')[0];
-        if (e2) e2.value = end.toISOString().split('T')[0];
-    },
+        start.setDate(end.getDate() - days);
+        document.getElementById('analytics-start').value = start.toISOString().split('T')[0];
+        document.getElementById('analytics-end').value = end.toISOString().split('T')[0];
+      }
+      if (e.target.id === 'analytics-apply-btn') {
+        this.load();
+      }
+    });
+  },
 
-    getParams() {
-        return {
-            startDate: document.getElementById('analytics-start')?.value || '',
-            endDate: document.getElementById('analytics-end')?.value || '',
-            viewMode: document.getElementById('analytics-view-mode')?.value || 'my',
-            groupId: document.getElementById('analytics-group-sel')?.value || 'all',
-        };
-    },
+  setDefaultDates() {
+    const end = new Date();
+    const start = new Date();
+    start.setMonth(end.getMonth() - 3);
+    const s = document.getElementById('analytics-start');
+    const e2 = document.getElementById('analytics-end');
+    if (s) s.value = start.toISOString().split('T')[0];
+    if (e2) e2.value = end.toISOString().split('T')[0];
+  },
 
-    // ── Main load router ──────────────────────────────────────────────────────
-    async load() {
-        const { viewMode, groupId, startDate, endDate } = this.getParams();
-        const qs = `startDate=${startDate}&endDate=${endDate}`;
+  getParams() {
+    return {
+      startDate: document.getElementById('analytics-start')?.value || '',
+      endDate: document.getElementById('analytics-end')?.value || '',
+      viewMode: document.getElementById('analytics-view-mode')?.value || 'my',
+      groupId: document.getElementById('analytics-group-sel')?.value || 'all',
+    };
+  },
 
-        this.showLoading(true);
-        try {
-            if (viewMode === 'my') {
-                await this.loadMySpending(qs);
-            } else if (viewMode === 'group' && groupId !== 'all') {
-                await this.loadGroupDetail(groupId, qs);
-            } else {
-                await this.loadAllGroups(qs);
-            }
-        } catch (err) {
-            console.error('Analytics load error:', err);
-        } finally {
-            this.showLoading(false);
-        }
-    },
+  // ── Main load router ──────────────────────────────────────────────────────
+  async load() {
+    const { viewMode, groupId, startDate, endDate } = this.getParams();
+    const qs = `startDate=${startDate}&endDate=${endDate}`;
 
-    // ── Mode 1: My Spending ───────────────────────────────────────────────────
-    async loadMySpending(qs) {
-        const [cats, timeline, groups] = await Promise.all([
-            API.get(`/analytics/my/categories?${qs}`),
-            API.get(`/analytics/my/timeline?${qs}`),
-            API.get(`/analytics/my/groups?${qs}`),
-        ]);
+    this.destroyAll(); // clean up before replacing DOM with spinner
+    this.showLoading(true);
+    try {
+      if (viewMode === 'my') {
+        await this.loadMySpending(qs);
+      } else if (viewMode === 'group' && groupId !== 'all') {
+        await this.loadGroupDetail(groupId, qs);
+      } else {
+        await this.loadAllGroups(qs);
+      }
+    } catch (err) {
+      console.error('Analytics load error:', err);
+    } finally {
+      this.showLoading(false);
+    }
+  },
 
-        const total = cats.reduce((s, c) => s + (c.total || 0), 0);
+  // ── Mode 1: My Spending ───────────────────────────────────────────────────
+  async loadMySpending(qs) {
+    const [cats, timeline, groups] = await Promise.all([
+      API.get(`/analytics/my/categories?${qs}`),
+      API.get(`/analytics/my/timeline?${qs}`),
+      API.get(`/analytics/my/groups?${qs}`),
+    ]);
 
-        this.setLayout(`
+    const total = cats.reduce((s, c) => s + (Number(c.total) || 0), 0);
+
+    this.setLayout(`
       <div class="analytics-summary-row">
         <div class="analytics-stat-card">
           <div class="stat-label">Total Spent (my share)</div>
@@ -165,11 +170,11 @@ const Charts = {
       <div class="analytics-charts-grid">
         <div class="chart-card chart-card-md">
           <h4>Spending by Category</h4>
-          <div class="chart-wrap"><canvas id="cat-pie-chart"></canvas></div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="cat-pie-chart"></canvas></div>
         </div>
         <div class="chart-card chart-card-md">
           <h4>My Spend by Group</h4>
-          <div class="chart-wrap"><canvas id="group-bar-chart"></canvas></div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="group-bar-chart"></canvas></div>
         </div>
         <div class="chart-card chart-card-full">
           <h4>My Spending Timeline</h4>
@@ -178,24 +183,24 @@ const Charts = {
       </div>
     `);
 
-        this.renderPie('cat-pie-chart', cats);
-        this.renderGroupBar('group-bar-chart', groups);
-        this.renderLine('timeline-line-chart', [{ label: 'My Spending', data: timeline, color: '#14b8a6' }]);
-    },
+    this.renderPie('cat-pie-chart', cats);
+    this.renderGroupBar('group-bar-chart', groups);
+    this.renderLine('timeline-line-chart', [{ label: 'My Spending', data: timeline, color: '#14b8a6' }]);
+  },
 
-    // ── Mode 2: Group Detail ──────────────────────────────────────────────────
-    async loadGroupDetail(groupId, qs) {
-        const groupName = this.groups.find(g => g.id == groupId)?.name || `Group ${groupId}`;
+  // ── Mode 2: Group Detail ──────────────────────────────────────────────────
+  async loadGroupDetail(groupId, qs) {
+    const groupName = this.groups.find(g => g.id == groupId)?.name || `Group ${groupId}`;
 
-        const [cats, members, timeline] = await Promise.all([
-            API.get(`/analytics/group/${groupId}/categories?${qs}`),
-            API.get(`/analytics/group/${groupId}/members?${qs}`),
-            API.get(`/analytics/group/${groupId}/timeline?${qs}`),
-        ]);
+    const [cats, members, timeline] = await Promise.all([
+      API.get(`/analytics/group/${groupId}/categories?${qs}`),
+      API.get(`/analytics/group/${groupId}/members?${qs}`),
+      API.get(`/analytics/group/${groupId}/timeline?${qs}`),
+    ]);
 
-        const totalSpend = timeline.reduce((s, t) => s + (t.total || 0), 0);
+    const totalSpend = timeline.reduce((s, t) => s + (Number(t.total) || 0), 0);
 
-        this.setLayout(`
+    this.setLayout(`
       <div class="analytics-summary-row">
         <div class="analytics-stat-card">
           <div class="stat-label">Total Group Spend</div>
@@ -214,11 +219,11 @@ const Charts = {
       <div class="analytics-charts-grid">
         <div class="chart-card chart-card-md">
           <h4>Category Breakdown</h4>
-          <div class="chart-wrap"><canvas id="cat-pie-chart"></canvas></div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="cat-pie-chart"></canvas></div>
         </div>
         <div class="chart-card chart-card-md">
           <h4>Who Paid Most</h4>
-          <div class="chart-wrap"><canvas id="member-bar-chart"></canvas></div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="member-bar-chart"></canvas></div>
         </div>
         <div class="chart-card chart-card-full">
           <h4>${this.esc(groupName)} — Spending Over Time</h4>
@@ -227,26 +232,26 @@ const Charts = {
       </div>
     `);
 
-        this.renderPie('cat-pie-chart', cats);
-        this.renderMemberBar('member-bar-chart', members);
-        this.renderLine('timeline-line-chart', [{
-            label: groupName,
-            data: timeline,
-            color: '#6366f1',
-        }]);
-    },
+    this.renderPie('cat-pie-chart', cats);
+    this.renderMemberBar('member-bar-chart', members);
+    this.renderLine('timeline-line-chart', [{
+      label: groupName,
+      data: timeline,
+      color: '#6366f1',
+    }]);
+  },
 
-    // ── Mode 3: All Groups ────────────────────────────────────────────────────
-    async loadAllGroups(qs) {
-        const [summary, cats, timelines] = await Promise.all([
-            API.get(`/analytics/groups/summary?${qs}`),
-            API.get(`/analytics/groups/categories?${qs}`),
-            API.get(`/analytics/groups/timelines?${qs}`),
-        ]);
+  // ── Mode 3: All Groups ────────────────────────────────────────────────────
+  async loadAllGroups(qs) {
+    const [summary, cats, timelines] = await Promise.all([
+      API.get(`/analytics/groups/summary?${qs}`),
+      API.get(`/analytics/groups/categories?${qs}`),
+      API.get(`/analytics/groups/timelines?${qs}`),
+    ]);
 
-        const totalSpend = summary.reduce((s, g) => s + (g.total || 0), 0);
+    const totalSpend = summary.reduce((s, g) => s + (Number(g.total) || 0), 0);
 
-        this.setLayout(`
+    this.setLayout(`
       <div class="analytics-summary-row">
         <div class="analytics-stat-card">
           <div class="stat-label">Total All Groups</div>
@@ -265,11 +270,11 @@ const Charts = {
       <div class="analytics-charts-grid">
         <div class="chart-card chart-card-md">
           <h4>Spend by Group</h4>
-          <div class="chart-wrap"><canvas id="groups-bar-chart"></canvas></div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="groups-bar-chart"></canvas></div>
         </div>
         <div class="chart-card chart-card-md">
           <h4>Category Breakdown (All Groups)</h4>
-          <div class="chart-wrap"><canvas id="cat-pie-chart"></canvas></div>
+          <div class="chart-wrap chart-wrap-tall"><canvas id="cat-pie-chart"></canvas></div>
         </div>
         <div class="chart-card chart-card-full">
           <h4>Spending Timeline by Group</h4>
@@ -278,222 +283,235 @@ const Charts = {
       </div>
     `);
 
-        // Group bar
-        this.renderGroupBar('groups-bar-chart', summary.map(g => ({
-            group_name: g.group_name, total: g.total
-        })));
+    // Group bar
+    this.renderGroupBar('groups-bar-chart', summary.map(g => ({
+      group_name: g.group_name, total: g.total
+    })));
 
-        // Category pie
-        this.renderPie('cat-pie-chart', cats);
+    // Category pie
+    this.renderPie('cat-pie-chart', cats);
 
-        // Multi-line: one series per group
-        const PALETTE = ['#14b8a6', '#6366f1', '#f97316', '#ec4899', '#3b82f6', '#a855f7', '#10b981', '#06b6d4'];
-        const groupIds = [...new Set(timelines.map(t => t.group_id))];
-        const months = [...new Set(timelines.map(t => t.month))].sort();
+    // Multi-line: one series per group
+    const PALETTE = ['#14b8a6', '#6366f1', '#f97316', '#ec4899', '#3b82f6', '#a855f7', '#10b981', '#06b6d4'];
+    const groupIds = [...new Set(timelines.map(t => t.group_id))];
+    const months = [...new Set(timelines.map(t => t.month))].sort();
 
-        const series = groupIds.map((gid, i) => {
-            const gName = timelines.find(t => t.group_id === gid)?.group_name || `Group ${gid}`;
-            const data = months.map(m => {
-                const found = timelines.find(t => t.group_id === gid && t.month === m);
-                return found ? { month: m, total: found.total } : { month: m, total: 0 };
-            });
-            return { label: gName, data, color: PALETTE[i % PALETTE.length] };
-        });
+    const series = groupIds.map((gid, i) => {
+      const gName = timelines.find(t => t.group_id === gid)?.group_name || `Group ${gid}`;
+      const data = months.map(m => {
+        const found = timelines.find(t => t.group_id === gid && t.month === m);
+        return found ? { month: m, total: found.total } : { month: m, total: 0 };
+      });
+      return { label: gName, data, color: PALETTE[i % PALETTE.length] };
+    });
 
-        this.renderLine('timeline-line-chart', series);
-    },
+    this.renderLine('timeline-line-chart', series);
+  },
 
-    // ── Chart renderers ───────────────────────────────────────────────────────
-    renderPie(canvasId, data) {
-        this.destroyChart(canvasId);
-        const ctx = document.getElementById(canvasId)?.getContext('2d');
-        if (!ctx || !data.length) return;
+  // ── Chart renderers ───────────────────────────────────────────────────────
+  renderPie(canvasId, data) {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx || !data.length) { this.destroyChart(canvasId); return; }
 
-        this.instances[canvasId] = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: data.map(d => d.name || 'Other'),
-                datasets: [{
-                    data: data.map(d => Math.round((d.total || 0) * 100) / 100),
-                    backgroundColor: data.map(d => (d.color || '#64748b') + 'cc'),
-                    borderColor: data.map(d => d.color || '#64748b'),
-                    borderWidth: 2,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 12 } } },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => ` ${App.currency(ctx.parsed)}`,
-                        },
-                    },
-                },
-            },
-        });
-    },
+    const labels = data.map(d => d.name || 'Other');
+    const values = data.map(d => Math.round((d.total || 0) * 100) / 100);
+    const bgColors = data.map(d => (d.color || '#64748b') + 'cc');
+    const borderColors = data.map(d => d.color || '#64748b');
 
-    renderGroupBar(canvasId, data) {
-        this.destroyChart(canvasId);
-        const ctx = document.getElementById(canvasId)?.getContext('2d');
-        if (!ctx || !data.length) return;
+    // Update in-place if chart already exists (avoids enter-from-zero animation)
+    if (this.instances[canvasId]) {
+      const ch = this.instances[canvasId];
+      ch.data.labels = labels;
+      ch.data.datasets[0].data = values;
+      ch.data.datasets[0].backgroundColor = bgColors;
+      ch.data.datasets[0].borderColor = borderColors;
+      ch.update('active');
+      return;
+    }
 
-        const PALETTE = ['#14b8a6', '#6366f1', '#f97316', '#ec4899', '#3b82f6', '#a855f7'];
+    this.instances[canvasId] = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{ data: values, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 2 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 12 } } },
+          tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed)}` } },
+        },
+      },
+    });
+  },
 
-        this.instances[canvasId] = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: data.map(d => d.group_name),
-                datasets: [{
-                    label: 'Spent',
-                    data: data.map(d => Math.round((d.total || 0) * 100) / 100),
-                    backgroundColor: data.map((_, i) => PALETTE[i % PALETTE.length] + 'bb'),
-                    borderColor: data.map((_, i) => PALETTE[i % PALETTE.length]),
-                    borderWidth: 2,
-                    borderRadius: 8,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed.y)}` } },
-                },
-                scales: {
-                    x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                    y: {
-                        ticks: { color: '#94a3b8', callback: v => App.currency(v) },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                    },
-                },
-            },
-        });
-    },
+  renderGroupBar(canvasId, data) {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx || !data.length) { this.destroyChart(canvasId); return; }
 
-    renderMemberBar(canvasId, data) {
-        this.destroyChart(canvasId);
-        const ctx = document.getElementById(canvasId)?.getContext('2d');
-        if (!ctx || !data.length) return;
+    const PALETTE = ['#14b8a6', '#6366f1', '#f97316', '#ec4899', '#3b82f6', '#a855f7'];
+    const labels = data.map(d => d.group_name);
+    const values = data.map(d => Math.round((d.total || 0) * 100) / 100);
+    const bgColors = data.map((_, i) => PALETTE[i % PALETTE.length] + 'bb');
+    const borderColors = data.map((_, i) => PALETTE[i % PALETTE.length]);
 
-        this.instances[canvasId] = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: data.map(d => d.name),
-                datasets: [{
-                    label: 'Total Paid',
-                    data: data.map(d => Math.round((d.total_paid || 0) * 100) / 100),
-                    backgroundColor: data.map(d => (d.avatar_color || '#14b8a6') + 'bb'),
-                    borderColor: data.map(d => d.avatar_color || '#14b8a6'),
-                    borderWidth: 2,
-                    borderRadius: 8,
-                }],
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed.x)}` } },
-                },
-                scales: {
-                    x: {
-                        ticks: { color: '#94a3b8', callback: v => App.currency(v) },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                    },
-                    y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                },
-            },
-        });
-    },
+    if (this.instances[canvasId]) {
+      const ch = this.instances[canvasId];
+      ch.data.labels = labels;
+      ch.data.datasets[0].data = values;
+      ch.data.datasets[0].backgroundColor = bgColors;
+      ch.data.datasets[0].borderColor = borderColors;
+      ch.update('active');
+      return;
+    }
 
-    renderLine(canvasId, series) {
-        this.destroyChart(canvasId);
-        const ctx = document.getElementById(canvasId)?.getContext('2d');
-        if (!ctx || !series.length) return;
+    this.instances[canvasId] = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{ label: 'Spent', data: values, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 2, borderRadius: 8 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed.y)}` } },
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#94a3b8', callback: v => App.currency(v) }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        },
+      },
+    });
+  },
 
-        // Collect all months across all series
-        const allMonths = [...new Set(series.flatMap(s => s.data.map(d => d.month)))].sort();
+  renderMemberBar(canvasId, data) {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx || !data.length) { this.destroyChart(canvasId); return; }
 
-        const datasets = series.map(s => ({
-            label: s.label,
-            data: allMonths.map(m => {
-                const found = s.data.find(d => d.month === m);
-                return found ? Math.round((found.total || 0) * 100) / 100 : 0;
-            }),
-            borderColor: s.color,
-            backgroundColor: s.color + '22',
-            tension: 0.4,
-            fill: series.length === 1,
-            pointBackgroundColor: s.color,
-            pointRadius: 4,
-        }));
+    const labels = data.map(d => d.name);
+    const values = data.map(d => Math.round((d.total_paid || 0) * 100) / 100);
+    const bgColors = data.map(d => (d.avatar_color || '#14b8a6') + 'bb');
+    const borderColors = data.map(d => d.avatar_color || '#14b8a6');
 
-        this.instances[canvasId] = new Chart(ctx, {
-            type: 'line',
-            data: { labels: allMonths.map(m => this.fmtMonth(m)), datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: series.length > 1,
-                        labels: { color: '#94a3b8', font: { size: 12 } },
-                    },
-                    tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed.y)}` } },
-                },
-                scales: {
-                    x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                    y: {
-                        ticks: { color: '#94a3b8', callback: v => App.currency(v) },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                    },
-                },
-            },
-        });
-    },
+    if (this.instances[canvasId]) {
+      const ch = this.instances[canvasId];
+      ch.data.labels = labels;
+      ch.data.datasets[0].data = values;
+      ch.data.datasets[0].backgroundColor = bgColors;
+      ch.data.datasets[0].borderColor = borderColors;
+      ch.update('active');
+      return;
+    }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    destroyChart(id) {
-        if (this.instances[id]) {
-            this.instances[id].destroy();
-            delete this.instances[id];
-        }
-    },
+    this.instances[canvasId] = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{ label: 'Total Paid', data: values, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 2, borderRadius: 8 }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed.x)}` } },
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8', callback: v => App.currency(v) }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        },
+      },
+    });
+  },
 
-    setLayout(html) {
-        const body = document.getElementById('analytics-body');
-        if (body) body.innerHTML = html;
-        // Destroy old charts if any canvas was replaced
-        for (const id of Object.keys(this.instances)) {
-            if (!document.getElementById(id)) delete this.instances[id];
-        }
-    },
+  renderLine(canvasId, series) {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx || !series.length) { this.destroyChart(canvasId); return; }
 
-    showLoading(show) {
-        const body = document.getElementById('analytics-body');
-        if (show && body) {
-            body.innerHTML = `
+    const allMonths = [...new Set(series.flatMap(s => s.data.map(d => d.month)))].sort();
+    const datasets = series.map(s => ({
+      label: s.label,
+      data: allMonths.map(m => { const f = s.data.find(d => d.month === m); return f ? Math.round((f.total || 0) * 100) / 100 : 0; }),
+      borderColor: s.color,
+      backgroundColor: s.color + '22',
+      tension: 0.4,
+      fill: series.length === 1,
+      pointBackgroundColor: s.color,
+      pointRadius: 4,
+    }));
+    const labels = allMonths.map(m => this.fmtMonth(m));
+
+    if (this.instances[canvasId]) {
+      const ch = this.instances[canvasId];
+      ch.data.labels = labels;
+      ch.data.datasets = datasets;
+      ch.update('active');
+      return;
+    }
+
+    this.instances[canvasId] = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: series.length > 1, labels: { color: '#94a3b8', font: { size: 12 } } },
+          tooltip: { callbacks: { label: (ctx) => ` ${App.currency(ctx.parsed.y)}` } },
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#94a3b8', callback: v => App.currency(v) }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        },
+      },
+    });
+  },
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  destroyChart(id) {
+    if (this.instances[id]) {
+      this.instances[id].destroy();
+      delete this.instances[id];
+    }
+  },
+
+  destroyAll() {
+    for (const id of Object.keys(this.instances)) {
+      this.destroyChart(id);
+    }
+  },
+
+  setLayout(html) {
+    this.destroyAll(); // destroy before canvas elements are removed from DOM
+    const body = document.getElementById('analytics-body');
+    if (body) body.innerHTML = html;
+  },
+
+  showLoading(show) {
+    const body = document.getElementById('analytics-body');
+    if (show && body) {
+      body.innerHTML = `
         <div style="text-align:center;padding:3rem;color:var(--text-muted)">
           <div class="spinner" style="margin:0 auto 1rem"></div>
           Loading analytics…
         </div>`;
-        }
-    },
+    }
+  },
 
-    fmtMonth(ym) {
-        if (!ym) return '';
-        const [y, m] = ym.split('-');
-        const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        return `${names[parseInt(m) - 1]} ${y}`;
-    },
+  fmtMonth(ym) {
+    if (!ym) return '';
+    const [y, m] = ym.split('-');
+    const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${names[parseInt(m) - 1]} ${y}`;
+  },
 
-    esc(str) {
-        const d = document.createElement('div');
-        d.textContent = str || '';
-        return d.innerHTML;
-    },
+  esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+  },
 };
