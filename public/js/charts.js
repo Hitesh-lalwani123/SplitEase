@@ -168,11 +168,11 @@ const Charts = {
       </div>
 
       <div class="analytics-charts-grid">
-        <div class="chart-card chart-card-full">
+        <div class="chart-card chart-card-md">
           <h4>Spending by Category</h4>
           <div class="chart-wrap chart-wrap-tall"><canvas id="cat-pie-chart"></canvas></div>
         </div>
-        <div class="chart-card chart-card-full">
+        <div class="chart-card chart-card-md">
           <h4>My Spend by Group</h4>
           <div class="chart-wrap chart-wrap-tall"><canvas id="group-bar-chart"></canvas></div>
         </div>
