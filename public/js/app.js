@@ -134,7 +134,7 @@ const App = {
             const expenses = await API.get('/expenses/recent');
             const list = document.getElementById('all-expenses-list');
             list.innerHTML = expenses.length
-                ? expenses.map(e => Expenses.renderItem(e, true)).join('')
+                ? expenses.map(e => Expenses.renderItem(e, true, { hideShare: true })).join('')
                 : '<div class="empty-state">No expenses yet</div>';
         } catch (err) {
             console.error(err);

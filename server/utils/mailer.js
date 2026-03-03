@@ -8,10 +8,16 @@ function getTransporter() {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
 
   _transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,          // STARTTLS — port 587 is open on Render free tier
+    requireTLS: true,       // force upgrade to TLS after connecting
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
+    },
+    tls: {
+      rejectUnauthorized: false,  // avoids cert issues on some hosting envs
     },
   });
   return _transporter;
