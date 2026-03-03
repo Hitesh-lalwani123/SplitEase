@@ -586,10 +586,12 @@ const Expenses = {
         const myNet = myPaid - myOwed;
 
         let shareHtml = '';
-        if (myNet > 0.005) {
-            shareHtml = `<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you lent ${App.currency(myNet)}</div>`;
-        } else if (myNet < -0.005) {
-            shareHtml = `<div style="font-size:0.72rem;color:#f87171;font-weight:600;margin-top:2px">you borrowed ${App.currency(Math.abs(myNet))}</div>`;
+        if (!opts.hideShare) {
+            if (myNet > 0.005) {
+                shareHtml = `<div style="font-size:0.72rem;color:#10b981;font-weight:600;margin-top:2px">you lent ${App.currency(myNet)}</div>`;
+            } else if (myNet < -0.005) {
+                shareHtml = `<div style="font-size:0.72rem;color:#f87171;font-weight:600;margin-top:2px">you borrowed ${App.currency(Math.abs(myNet))}</div>`;
+            }
         }
 
         const displayAmt = myOwed > 0.005 ? myOwed : totalAmt;
