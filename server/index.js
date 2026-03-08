@@ -15,6 +15,7 @@ const settlementRoutes = require('./routes/settlements');
 const analyticsRoutes = require('./routes/analytics');
 const oauthRoutes = require('./routes/oauth');
 const invitationRoutes = require('./routes/invitations');
+const healthRoute = require('./routes/health');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,6 +35,7 @@ app.use('/api/settlements', settlementRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/oauth', oauthRoutes);
 app.use('/api/invitations', invitationRoutes);
+app.use('/health-check', healthRoute);
 
 // SPA fallback — serve index.html for all non-API routes (including /invite/:token)
 app.get('*', (req, res) => {
